@@ -1,0 +1,1 @@
+# prj-newt-mechanica
