@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>横スクロールシューティング</title>
+<style>
+  :root {
+    --page: #1a1320;
+    --border: #6b3a2a;
+    --paper: #ffcf87;
+    --accent: #ff9d6b;
+    --text: #f3e4c9;
+    --glow: rgba(214,120,60,.3);
+    --font: "Yu Mincho", "Hiragino Mincho ProN", "MS Mincho", serif;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--page);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font);
+    color: var(--text);
+    user-select: none;
+    transition: background .4s;
+  }
+  #wrap { position: relative; }
+  canvas {
+    background: #000;
+    border: 4px solid var(--border);
+    box-shadow: 0 0 50px var(--glow);
+    display: block;
+    transition: border-color .4s, box-shadow .4s;
+  }
+  #hud {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--text);
+    text-shadow: 0 0 6px rgba(0,0,0,.85);
+    pointer-events: none;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    text-align: center;
+    gap: 14px;
+  }
+  #overlay h1 {
+    margin: 0;
+    font-size: 38px;
+    color: var(--paper);
+    letter-spacing: 5px;
+    text-shadow: 0 0 16px var(--glow), 2px 2px 0 rgba(0,0,0,.6);
+  }
+  #overlay p { margin: 0; font-size: 16px; line-height: 1.9; color: var(--text); }
+  #overlay .key { color: var(--accent); }
+  #selector, #diffSelector { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; justify-content: center; }
+  .themeBtn {
+    padding: 8px 18px;
+    font-size: 15px;
+    background: transparent;
+    color: var(--text);
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: 1px;
+    opacity: .55;
+    transition: all .2s;
+  }
+  .themeBtn.active { opacity: 1; background: var(--paper); color: #1a1320; border-color: var(--paper); font-weight: bold; }
+  #startBtn {
+    margin-top: 6px;
+    padding: 13px 34px;
+    font-size: 19px;
+    color: #1a1320;
+    background: var(--paper);
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    letter-spacing: 3px;
+    font-family: inherit;
+  }
+  #startBtn:hover { filter: brightness(1.1); }
+  .hidden { display: none !important; }
+  #tip { margin-top: 14px; font-size: 13px; color: #9b8a78; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="hud"></div>
+  <div id="overlay">
+    <h1></h1>
+    <p></p>
+    <div id="selector"></div>
+    <div id="diffSelector"></div>
+    <button id="autoToggle" class="themeBtn">オートプレイ: OFF　[ O ]</button>
+    <button id="startBtn"></button>
+  </div>
+  <div id="tip"></div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+const hud = document.getElementById("hud");
+const overlay = document.getElementById("overlay");
+const startBtn = document.getElementById("startBtn");
+const selector = document.getElementById("selector");
+const diffSelector = document.getElementById("diffSelector");
+const autoToggle = document.getElementById("autoToggle");
+const tip = document.getElementById("tip");
+
+let difficulty = "oni";
+let autoPlay = true;
+
+// ============================================================
+//  テーマ定義
+// ============================================================
+const THEMES = {
+  // ---------- 和風 ----------
+  wafu: {
+    name: "和風",
+    css: { page:"#1a1320", border:"#6b3a2a", paper:"#ffcf87", accent:"#ff9d6b",
+           text:"#f3e4c9", glow:"rgba(214,120,60,.3)",
+           font:'"Yu Mincho","Hiragino Mincho ProN","MS Mincho",serif' },
+    ui: {
+      title: "和 風 弾 幕 絵 巻",
+      instr: '<span class="key">↑ ↓ ← →</span> または <span class="key">WASD</span> で操船<br>'
+           + '<span class="key">スペース</span> でお札を放つ<br>物の怪を祓いて功徳を積め。三度 被らば 夢 覚むる。',
+      tip: "鬼火を躱し 物の怪を 撃ち祓え　[ T キーで趣を切替 ]",
+      start: "は じ め る", retry: "も う 一 度",
+      scoreLabel: "功徳", livesLabel: "残機", lifeIcon: "☗",
+      overTitle: "夢 か ら 覚 む",
+      overText: s => `積みし功徳: <span class="key">${s}</span><br>いま一度 物の怪を祓わん。`
+    },
+    floaterColors: null,
+    enemyColor: k => k==="b" ? "#d6342f" : k==="w" ? "#7fe0c0" : "#ff7a3d",
+    playerHit: "#ffb0b0", spark: "#ffe9b0",
+
+    drawBackground(st) {
+      const sky = ctx.createLinearGradient(0,0,0,H);
+      sky.addColorStop(0,"#3a1d3d"); sky.addColorStop(.45,"#7a2f44");
+      sky.addColorStop(.7,"#c95a3c"); sky.addColorStop(1,"#e8945a");
+      ctx.fillStyle = sky; ctx.fillRect(0,0,W,H);
+      // 日輪
+      ctx.fillStyle = "rgba(255,220,160,.85)";
+      ctx.beginPath(); ctx.arc(W*0.72, H*0.5, 70, 0, Math.PI*2); ctx.fill();
+      // 山並み
+      const cols = ["#3a2240","#4a2738","#5a2d33"];
+      st.mountains.forEach((m,i) => {
+        ctx.fillStyle = cols[i];
+        ctx.beginPath(); ctx.moveTo(0,H);
+        for (let x = -300 + (300 - m.off); x <= W+300; x += 300) {
+          ctx.lineTo(x, H-m.h);
+          ctx.lineTo(x+150, H-m.h - m.h*0.7);
+          ctx.lineTo(x+300, H-m.h);
+        }
+        ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+      });
+    },
+    drawFloater(f) {
+      ctx.globalAlpha = 0.5 + f.z*0.25;
+      ctx.fillStyle = "#ffd0de";
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.sway);
+      ctx.beginPath(); ctx.ellipse(0,0,f.size,f.size*0.55,0,0,Math.PI*2); ctx.fill();
+      ctx.restore(); ctx.globalAlpha = 1;
+    },
+    drawPlayer(p, blink) {
+      const w=p.w,h=p.h;
+      ctx.save(); ctx.translate(p.x,p.y);
+      ctx.fillStyle = blink ? "rgba(245,235,210,.4)" : "#f3e9d2";
+      ctx.beginPath(); ctx.moveTo(w/2,0);
+      ctx.quadraticCurveTo(w/4,h/2,-w/2,h/2); ctx.lineTo(-w/2,-h/2);
+      ctx.quadraticCurveTo(w/4,-h/2,w/2,0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#c4302b"; ctx.fillRect(-w/2,-3,w*0.8,6);
+      ctx.fillStyle = "#fff"; ctx.fillRect(-6,-h/2-16,16,18);
+      ctx.fillStyle = "#c4302b"; ctx.beginPath(); ctx.arc(2,-h/2-7,5,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    },
+    drawEnemy(e) {
+      ctx.save(); ctx.translate(e.x,e.y);
+      if (e.kind==="s") { // 提灯お化け
+        const sq = Math.sin(e.bob)*2;
+        ctx.fillStyle = "#ff7a3d";
+        ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2+sq,0,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle = "rgba(120,30,10,.5)"; ctx.lineWidth = 2;
+        for (let i=-2;i<=2;i++){ ctx.beginPath(); ctx.ellipse(0,i*6,e.w/2*(1-Math.abs(i)*0.08),3,0,0,Math.PI*2); ctx.stroke(); }
+        ctx.fillStyle = "#1a0a0a";
+        ctx.beginPath(); ctx.arc(-6,-3,3,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(6,-3,3,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0,7,5,3,0,0,Math.PI*2); ctx.fill();
+      } else if (e.kind==="w") { // 鬼火
+        const r=e.w/2, g=ctx.createRadialGradient(0,0,2,0,0,r);
+        g.addColorStop(0,"#eafff6"); g.addColorStop(.5,"#7fe0c0"); g.addColorStop(1,"rgba(40,180,140,0)");
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#7fe0c0"; ctx.globalAlpha=.5; ctx.beginPath();
+        ctx.moveTo(r*0.6,0); ctx.quadraticCurveTo(r*1.4,Math.sin(e.phase*2)*6,r*1.8,0);
+        ctx.quadraticCurveTo(r*1.4,-4,r*0.6,0); ctx.fill(); ctx.globalAlpha=1;
+      } else { // だるま
+        ctx.fillStyle="#d6342f"; ctx.beginPath(); ctx.ellipse(0,4,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#f0e2c0"; ctx.beginPath(); ctx.ellipse(0,0,e.w/2.6,e.h/3,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#1a0a0a";
+        ctx.beginPath(); ctx.arc(-9,-2,4,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(9,-2,4,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle="#1a0a0a"; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(-7,10); ctx.quadraticCurveTo(0,6,7,10); ctx.stroke();
+      }
+      ctx.restore();
+    },
+    drawPlayerBullet(b) {
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(Math.sin(b.spin)*0.3);
+      ctx.fillStyle="#fff7e6"; ctx.fillRect(-9,-5,18,10);
+      ctx.fillStyle="#c4302b"; ctx.fillRect(-9,-5,4,10); ctx.restore();
+    },
+    drawEnemyBullet(b) {
+      const g=ctx.createRadialGradient(b.x,b.y,1,b.x,b.y,b.r+2);
+      g.addColorStop(0,"#fff"); g.addColorStop(.5,"#ff8a5a"); g.addColorStop(1,"rgba(200,60,30,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+2,0,Math.PI*2); ctx.fill();
+    }
+  },
+
+  // ---------- ペルー（アンデス） ----------
+  peru: {
+    name: "ペルー",
+    css: { page:"#10243a", border:"#c9462d", paper:"#ffc83d", accent:"#ff6b3d",
+           text:"#fff3df", glow:"rgba(255,170,40,.35)",
+           font:'"Trebuchet MS","Verdana",sans-serif' },
+    ui: {
+      title: "CÓNDOR DE LOS ANDES",
+      instr: '<span class="key">↑ ↓ ← →</span> / <span class="key">WASD</span> で飛翔<br>'
+           + '<span class="key">スペース</span> で羽根を放つ<br>アンデスの精霊を祓い 太陽の加護を集めよ。三度 墜ちれば終い。',
+      tip: "聖なる鳥コンドルとなり 谷を翔けよ　[ T キーで趣を切替 ]",
+      start: "¡VAMOS!", retry: "OTRA VEZ",
+      scoreLabel: "Puntos", livesLabel: "Vidas", lifeIcon: "✦",
+      overTitle: "¡HASTA LUEGO!",
+      overText: s => `集めし加護: <span class="key">${s}</span><br>もう一度 大空へ。`
+    },
+    enemyColor: k => k==="b" ? "#e8c84a" : k==="w" ? "#ff4d8d" : "#d97a2b",
+    playerHit: "#ffd27a", spark: "#fff0b0",
+
+    drawBackground(st) {
+      const sky = ctx.createLinearGradient(0,0,0,H);
+      sky.addColorStop(0,"#123a6e"); sky.addColorStop(.4,"#2f7ec0");
+      sky.addColorStop(.75,"#8fc7e6"); sky.addColorStop(1,"#f2e2a8");
+      ctx.fillStyle = sky; ctx.fillRect(0,0,W,H);
+      // インティ（太陽神）
+      const sx=W*0.74, sy=H*0.36, R=46;
+      ctx.save(); ctx.translate(sx,sy);
+      ctx.fillStyle="rgba(255,200,60,.9)";
+      for (let i=0;i<16;i++){ ctx.rotate(Math.PI*2/16);
+        ctx.beginPath(); ctx.moveTo(R,0); ctx.lineTo(R+22,-5); ctx.lineTo(R+22,5); ctx.closePath(); ctx.fill(); }
+      ctx.fillStyle="#ffd24a"; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+      // アンデスの山（雪冠つき）
+      const cols = ["#4a6a7a","#6b5a4a","#8a6048"];
+      st.mountains.forEach((m,i) => {
+        ctx.fillStyle = cols[i];
+        ctx.beginPath(); ctx.moveTo(0,H);
+        for (let x = -300 + (300 - m.off); x <= W+300; x += 300) {
+          ctx.lineTo(x, H-m.h);
+          ctx.lineTo(x+150, H-m.h - m.h*0.9);
+          ctx.lineTo(x+300, H-m.h);
+        }
+        ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+        if (i===2) { // 手前の山頂に雪
+          ctx.fillStyle="rgba(255,255,255,.85)";
+          for (let x = -300 + (300 - m.off); x <= W+300; x += 300) {
+            const peakX=x+150, peakY=H-m.h-m.h*0.9;
+            ctx.beginPath(); ctx.moveTo(peakX,peakY);
+            ctx.lineTo(peakX-22,peakY+34); ctx.lineTo(peakX-8,peakY+26);
+            ctx.lineTo(peakX,peakY+34); ctx.lineTo(peakX+8,peakY+26);
+            ctx.lineTo(peakX+22,peakY+34); ctx.closePath(); ctx.fill();
+          }
+        }
+      });
+    },
+    drawFloater(f) { // アンデス織物の紙吹雪
+      const palette = ["#ff3b6b","#ffc83d","#2fb84a","#3d8bff","#ff7a1f"];
+      ctx.globalAlpha = 0.6 + f.z*0.2;
+      ctx.fillStyle = palette[f.idx % palette.length];
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.sway);
+      ctx.fillRect(-f.size/2, -f.size/2, f.size, f.size*0.7);
+      ctx.restore(); ctx.globalAlpha = 1;
+    },
+    drawPlayer(p, blink, frame) { // コンドル
+      const w=p.w, h=p.h, flap = Math.sin(frame*0.25)*0.5;
+      ctx.save(); ctx.translate(p.x,p.y);
+      ctx.globalAlpha = blink ? 0.4 : 1;
+      ctx.fillStyle = "#2b2b30";
+      // 両翼
+      ctx.beginPath();
+      ctx.moveTo(-2,0);
+      ctx.lineTo(-w*0.5, -h*0.7 - flap*14);
+      ctx.lineTo(-w*0.1, -h*0.15);
+      ctx.lineTo(-w*0.5, h*0.7 + flap*14);
+      ctx.lineTo(-2,0);
+      ctx.closePath(); ctx.fill();
+      // 翼端の指羽
+      ctx.fillRect(-w*0.55,-h*0.75-flap*14, 10, 4);
+      ctx.fillRect(-w*0.55, h*0.7+flap*14, 10, 4);
+      // 胴と頭
+      ctx.beginPath(); ctx.ellipse(w*0.1,0,w*0.42,h*0.32,0,0,Math.PI*2); ctx.fill();
+      // 白い襟巻き
+      ctx.fillStyle="#f2efe6"; ctx.beginPath(); ctx.ellipse(w*0.32,0,6,8,0,0,Math.PI*2); ctx.fill();
+      // 頭・くちばし
+      ctx.fillStyle="#2b2b30"; ctx.beginPath(); ctx.arc(w*0.42,0,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#e8a23a"; ctx.beginPath();
+      ctx.moveTo(w*0.5,-2); ctx.lineTo(w*0.62,0); ctx.lineTo(w*0.5,3); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1; ctx.restore();
+    },
+    drawEnemy(e) {
+      ctx.save(); ctx.translate(e.x,e.y);
+      if (e.kind==="s") { // 土器の壺
+        ctx.fillStyle="#d97a2b";
+        ctx.beginPath();
+        ctx.moveTo(-e.w/2, -e.h/3);
+        ctx.quadraticCurveTo(-e.w/2-3, e.h/4, 0, e.h/2);
+        ctx.quadraticCurveTo(e.w/2+3, e.h/4, e.w/2, -e.h/3);
+        ctx.lineTo(e.w/4, -e.h/2); ctx.lineTo(-e.w/4,-e.h/2); ctx.closePath(); ctx.fill();
+        // 幾何学模様
+        ctx.strokeStyle="#3a1f10"; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(-e.w/2,2); ctx.lineTo(e.w/2,2); ctx.stroke();
+        ctx.fillStyle="#fff0d0";
+        for (let i=-1;i<=1;i++){ ctx.fillRect(i*9-3, -8, 6, 6); }
+      } else if (e.kind==="w") { // ハチドリ
+        const flap=Math.sin(e.phase*4)*0.6;
+        ctx.fillStyle="#ff4d8d";
+        ctx.beginPath(); ctx.ellipse(0,0,e.w/2.4,e.h/3,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="rgba(120,230,255,.8)";
+        ctx.beginPath(); ctx.ellipse(0,-e.h/2,e.w/2,4+flap*4,0,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, e.h/2,e.w/2,4+flap*4,0,0,Math.PI*2); ctx.fill();
+        // 長いくちばし
+        ctx.strokeStyle="#2b2b30"; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(-e.w/2.4,0); ctx.lineTo(-e.w/1.3,0); ctx.stroke();
+        ctx.fillStyle="#1a0a0a"; ctx.beginPath(); ctx.arc(2,-2,2.5,0,Math.PI*2); ctx.fill();
+      } else { // 黄金の太陽仮面
+        ctx.fillStyle="#e8c84a";
+        for (let i=0;i<12;i++){ ctx.save(); ctx.rotate(Math.PI*2/12*i);
+          ctx.beginPath(); ctx.moveTo(e.w/2,0); ctx.lineTo(e.w/2+14,-4); ctx.lineTo(e.w/2+14,4); ctx.closePath(); ctx.fill(); ctx.restore(); }
+        ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#a8791f";
+        ctx.fillRect(-12,-8,7,6); ctx.fillRect(5,-8,7,6); // 角ばった目
+        ctx.fillRect(-9,8,18,4); // 口
+        ctx.strokeStyle="#a8791f"; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(0,-4); ctx.lineTo(-4,6); ctx.lineTo(4,6); ctx.stroke(); // 鼻
+      }
+      ctx.restore();
+    },
+    drawPlayerBullet(b) { // コンドルの羽根
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(Math.sin(b.spin)*0.4);
+      ctx.fillStyle="#f2efe6";
+      ctx.beginPath(); ctx.ellipse(0,0,10,4,0,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle="#2b2b30"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(-9,0); ctx.lineTo(9,0); ctx.stroke();
+      ctx.restore();
+    },
+    drawEnemyBullet(b) { // 投石
+      const g=ctx.createRadialGradient(b.x,b.y,1,b.x,b.y,b.r+2);
+      g.addColorStop(0,"#fff6d6"); g.addColorStop(.5,"#ffb13d"); g.addColorStop(1,"rgba(200,90,20,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+2,0,Math.PI*2); ctx.fill();
+    }
+  },
+
+  // ---------- ウクライナ ----------
+  ukraine: {
+    name: "ウクライナ",
+    css: { page:"#0a2540", border:"#ffd700", paper:"#ffd700", accent:"#7fb2ff",
+           text:"#eaf3ff", glow:"rgba(255,215,0,.35)",
+           font:'"Segoe UI","Verdana",sans-serif' },
+    ui: {
+      title: "ПОЛІТ ЛЕЛЕКИ",
+      instr: '<span class="key">↑ ↓ ← →</span> / <span class="key">WASD</span> で飛翔<br>'
+           + '<span class="key">スペース</span> で麦穂を放つ<br>青空と黄金の麦畑を翔けるコウノトリ。三度 墜ちれば終い。',
+      tip: "コウノトリとなり ヒマワリ畑の上を翔けよ　[ T キーで趣を切替 ]",
+      start: "ПОЧАТИ", retry: "ЩЕ РАЗ",
+      scoreLabel: "Очки", livesLabel: "Життя", lifeIcon: "❀",
+      overTitle: "КІНЕЦЬ",
+      overText: s => `集めし実り: <span class="key">${s}</span><br>もう一度 大空へ。`
+    },
+    enemyColor: k => k==="b" ? "#ffd24a" : k==="w" ? "#ffcf2e" : "#d98aa0",
+    playerHit: "#ffd27a", spark: "#fff0b0",
+    drawBackground(st) {
+      const sky=ctx.createLinearGradient(0,0,0,H);
+      sky.addColorStop(0,"#0d4fa0"); sky.addColorStop(.45,"#2f8fe0"); sky.addColorStop(.55,"#9fd0f5");
+      sky.addColorStop(.56,"#ffe14d"); sky.addColorStop(1,"#e8b400");
+      ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle="rgba(255,245,180,.9)"; ctx.beginPath(); ctx.arc(W*0.78,H*0.28,40,0,Math.PI*2); ctx.fill();
+      const cols=["#f2c61e","#e0ad12","#c79406"];
+      st.mountains.forEach((m,i)=>{ ctx.fillStyle=cols[i]; ctx.beginPath(); ctx.moveTo(0,H);
+        for(let x=-300+(300-m.off);x<=W+300;x+=300){ ctx.lineTo(x,H-m.h*0.55);
+          ctx.quadraticCurveTo(x+150,H-m.h*0.55-m.h*0.35,x+300,H-m.h*0.55);}
+        ctx.lineTo(W,H); ctx.closePath(); ctx.fill(); });
+    },
+    drawFloater(f){ // ヒマワリの花びら
+      ctx.globalAlpha=0.6+f.z*0.2; ctx.fillStyle="#ffcf2e";
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.sway);
+      ctx.beginPath(); ctx.ellipse(0,0,f.size,f.size*0.4,0,0,Math.PI*2); ctx.fill();
+      ctx.restore(); ctx.globalAlpha=1;
+    },
+    drawPlayer(p,blink,frame){ // コウノトリ
+      const w=p.w,h=p.h,flap=Math.sin(frame*0.25)*0.5;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.globalAlpha=blink?0.4:1;
+      ctx.fillStyle="#f5f5f5";
+      ctx.beginPath(); ctx.moveTo(-2,0);
+      ctx.lineTo(-w*0.5,-h*0.7-flap*14); ctx.lineTo(-w*0.1,-h*0.15);
+      ctx.lineTo(-w*0.5,h*0.7+flap*14); ctx.closePath(); ctx.fill();
+      ctx.fillStyle="#2b2b30"; ctx.fillRect(-w*0.55,-h*0.78-flap*14,12,6); ctx.fillRect(-w*0.55,h*0.72+flap*14,12,6);
+      ctx.fillStyle="#f5f5f5"; ctx.beginPath(); ctx.ellipse(w*0.1,0,w*0.42,h*0.3,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(w*0.42,-2,5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#e23b3b"; ctx.beginPath(); ctx.moveTo(w*0.46,-2); ctx.lineTo(w*0.68,0); ctx.lineTo(w*0.46,2); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha=1; ctx.restore();
+    },
+    drawEnemy(e){
+      ctx.save(); ctx.translate(e.x,e.y);
+      if(e.kind==="s"){ // ピサンカ（彩色卵）
+        ctx.fillStyle="#d98aa0"; ctx.beginPath(); ctx.ellipse(0,0,e.w/2.4,e.h/2,0,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-e.w/2.4,0); ctx.lineTo(e.w/2.4,0); ctx.stroke();
+        ctx.fillStyle="#7fb2ff"; for(let i=-1;i<=1;i++){ ctx.beginPath(); ctx.arc(i*8,-6,2.5,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(i*8,6,2.5,0,Math.PI*2); ctx.fill(); }
+      } else if(e.kind==="w"){ // ヒマワリ
+        ctx.fillStyle="#ffcf2e"; for(let i=0;i<12;i++){ ctx.save(); ctx.rotate(Math.PI*2/12*i+e.phase);
+          ctx.beginPath(); ctx.ellipse(e.w/2.6,0,6,3,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+        ctx.fillStyle="#6b3a1a"; ctx.beginPath(); ctx.arc(0,0,e.w/3.5,0,Math.PI*2); ctx.fill();
+      } else { // 黄金の紋章
+        ctx.fillStyle="#ffd24a"; ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle="#b8860b"; ctx.lineWidth=3;
+        for(let i=0;i<8;i++){ ctx.save(); ctx.rotate(Math.PI*2/8*i); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-e.w/2); ctx.stroke(); ctx.restore(); }
+        ctx.fillStyle="#b8860b"; ctx.beginPath(); ctx.arc(0,0,e.w/5,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    },
+    drawPlayerBullet(b){ // 麦穂
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(Math.sin(b.spin)*0.2);
+      ctx.fillStyle="#f2c61e"; ctx.fillRect(-9,-3,18,6);
+      ctx.fillStyle="#c79406"; for(let i=-1;i<=1;i++) ctx.fillRect(i*5,-3,2,6);
+      ctx.restore();
+    },
+    drawEnemyBullet(b){ const g=ctx.createRadialGradient(b.x,b.y,1,b.x,b.y,b.r+2);
+      g.addColorStop(0,"#fff"); g.addColorStop(.5,"#7fb2ff"); g.addColorStop(1,"rgba(40,120,220,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+2,0,Math.PI*2); ctx.fill(); }
+  },
+
+  // ---------- インドネシア ----------
+  indonesia: {
+    name: "インドネシア",
+    css: { page:"#1a0f12", border:"#e23b3b", paper:"#ffd24a", accent:"#ff7a5a",
+           text:"#fff0e6", glow:"rgba(226,59,59,.35)",
+           font:'"Trebuchet MS","Verdana",sans-serif' },
+    ui: {
+      title: "GARUDA NUSANTARA",
+      instr: '<span class="key">↑ ↓ ← →</span> / <span class="key">WASD</span> で飛翔<br>'
+           + '<span class="key">スペース</span> でクリスを放つ<br>霊鳥ガルーダとなり 火山と緑の島を翔けよ。三度 墜ちれば終い。',
+      tip: "ガルーダとなり 熱帯の島々を翔けよ　[ T キーで趣を切替 ]",
+      start: "MULAI", retry: "LAGI",
+      scoreLabel: "Skor", livesLabel: "Nyawa", lifeIcon: "✦",
+      overTitle: "TAMAT",
+      overText: s => `集めし守り: <span class="key">${s}</span><br>もう一度 大空へ。`
+    },
+    enemyColor: k => k==="b" ? "#e23b3b" : k==="w" ? "#3dd6b0" : "#caa24a",
+    playerHit:"#ffd27a", spark:"#fff0b0",
+    drawBackground(st){
+      const sky=ctx.createLinearGradient(0,0,0,H);
+      sky.addColorStop(0,"#0e3b6e"); sky.addColorStop(.4,"#2f8fc0"); sky.addColorStop(.8,"#9fd6c0"); sky.addColorStop(1,"#dcecc0");
+      ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle="rgba(255,240,180,.85)"; ctx.beginPath(); ctx.arc(W*0.2,H*0.25,36,0,Math.PI*2); ctx.fill();
+      const cols=["#2f6b4a","#235a3a","#3a2a1a"];
+      st.mountains.forEach((m,i)=>{ ctx.fillStyle=cols[i]; ctx.beginPath(); ctx.moveTo(0,H);
+        for(let x=-300+(300-m.off);x<=W+300;x+=300){ ctx.lineTo(x,H-m.h);
+          ctx.lineTo(x+130,H-m.h-m.h*0.8); ctx.lineTo(x+170,H-m.h-m.h*0.8); ctx.lineTo(x+300,H-m.h);}
+        ctx.lineTo(W,H); ctx.closePath(); ctx.fill(); });
+    },
+    drawFloater(f){ // プルメリアの花
+      const pal=["#ffffff","#ffd24a","#ff9ec0"];
+      ctx.globalAlpha=0.6+f.z*0.2; ctx.fillStyle=pal[f.idx%pal.length];
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.sway);
+      for(let i=0;i<5;i++){ ctx.rotate(Math.PI*2/5); ctx.beginPath(); ctx.ellipse(f.size*0.7,0,f.size*0.7,f.size*0.35,0,0,Math.PI*2); ctx.fill(); }
+      ctx.restore(); ctx.globalAlpha=1;
+    },
+    drawPlayer(p,blink,frame){ // ガルーダ
+      const w=p.w,h=p.h,flap=Math.sin(frame*0.25)*0.5;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.globalAlpha=blink?0.4:1;
+      ctx.fillStyle="#e8b53a";
+      ctx.beginPath(); ctx.moveTo(-2,0);
+      ctx.lineTo(-w*0.55,-h*0.8-flap*16); ctx.lineTo(-w*0.2,-h*0.2);
+      ctx.lineTo(-w*0.55,h*0.8+flap*16); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle="#a8791f"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(-w*0.45,-h*0.5-flap*10); ctx.lineTo(-w*0.15,-h*0.12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-w*0.45,h*0.5+flap*10); ctx.lineTo(-w*0.15,h*0.12); ctx.stroke();
+      ctx.fillStyle="#e8b53a"; ctx.beginPath(); ctx.ellipse(w*0.12,0,w*0.42,h*0.3,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#fff5e0"; ctx.beginPath(); ctx.arc(w*0.42,-2,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#e8a23a"; ctx.beginPath(); ctx.moveTo(w*0.48,-3); ctx.lineTo(w*0.64,0); ctx.lineTo(w*0.48,2); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha=1; ctx.restore();
+    },
+    drawEnemy(e){
+      ctx.save(); ctx.translate(e.x,e.y);
+      if(e.kind==="s"){ // ワヤン（影絵人形）
+        ctx.fillStyle="#caa24a";
+        ctx.beginPath(); ctx.moveTo(0,-e.h/2); ctx.quadraticCurveTo(e.w/2,-e.h/4,e.w/3,e.h/2);
+        ctx.lineTo(-e.w/3,e.h/2); ctx.quadraticCurveTo(-e.w/2,-e.h/4,0,-e.h/2); ctx.closePath(); ctx.fill();
+        ctx.fillStyle="#1a0a0a"; ctx.beginPath(); ctx.arc(2,-6,3,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle="#1a0a0a"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(2,-2); ctx.lineTo(10,2); ctx.stroke();
+      } else if(e.kind==="w"){ // 極楽鳥
+        const t=Math.sin(e.phase*3)*0.5;
+        ctx.fillStyle="#3dd6b0"; ctx.beginPath(); ctx.ellipse(0,0,e.w/2.6,e.h/3,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#ff7a1f"; ctx.beginPath(); ctx.moveTo(-e.w/3,0); ctx.quadraticCurveTo(-e.w,t*10,-e.w*1.2,0); ctx.quadraticCurveTo(-e.w,-6,-e.w/3,0); ctx.fill();
+        ctx.fillStyle="#1a0a0a"; ctx.beginPath(); ctx.arc(e.w/4,-2,2.5,0,Math.PI*2); ctx.fill();
+      } else { // バロンの仮面
+        ctx.fillStyle="#e23b3b"; ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#ffd24a"; for(let i=0;i<12;i++){ ctx.save(); ctx.rotate(Math.PI*2/12*i);
+          ctx.beginPath(); ctx.moveTo(e.w/2-2,0); ctx.lineTo(e.w/2+12,-5); ctx.lineTo(e.w/2+12,5); ctx.closePath(); ctx.fill(); ctx.restore(); }
+        ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(-9,-4,5,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(9,-4,5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#1a0a0a"; ctx.beginPath(); ctx.arc(-9,-4,2.5,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(9,-4,2.5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#fff"; ctx.fillRect(-8,8,16,5);
+      }
+      ctx.restore();
+    },
+    drawPlayerBullet(b){ // クリス（波刃の短剣）
+      ctx.save(); ctx.translate(b.x,b.y); ctx.fillStyle="#dfe7ee";
+      ctx.beginPath(); ctx.moveTo(-10,0);
+      ctx.quadraticCurveTo(-4,-4,0,0); ctx.quadraticCurveTo(4,4,10,0);
+      ctx.quadraticCurveTo(4,1,0,2); ctx.quadraticCurveTo(-4,2,-10,0); ctx.fill();
+      ctx.fillStyle="#8a5a1a"; ctx.fillRect(-12,-2,4,4); ctx.restore();
+    },
+    drawEnemyBullet(b){ const g=ctx.createRadialGradient(b.x,b.y,1,b.x,b.y,b.r+2);
+      g.addColorStop(0,"#fff"); g.addColorStop(.5,"#ff6b3d"); g.addColorStop(1,"rgba(200,40,20,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+2,0,Math.PI*2); ctx.fill(); }
+  },
+
+  // ---------- インド ----------
+  india: {
+    name: "インド",
+    css: { page:"#2a1006", border:"#ff9933", paper:"#ff9933", accent:"#138808",
+           text:"#fff3e0", glow:"rgba(255,153,51,.35)",
+           font:'"Trebuchet MS","Verdana",sans-serif' },
+    ui: {
+      title: "मयूर  MAYURA",
+      instr: '<span class="key">↑ ↓ ← →</span> / <span class="key">WASD</span> で飛翔<br>'
+           + '<span class="key">スペース</span> で矢を放つ<br>国鳥クジャクとなり 宮殿と蓮の池を翔けよ。三度 墜ちれば終い。',
+      tip: "クジャクとなり 黄金の宮殿の空を翔けよ　[ T キーで趣を切替 ]",
+      start: "शुरू", retry: "फिर से",
+      scoreLabel: "अंक", livesLabel: "जीवन", lifeIcon: "✦",
+      overTitle: "समाप्त",
+      overText: s => `集めし徳: <span class="key">${s}</span><br>もう一度 大空へ。`
+    },
+    enemyColor: k => k==="b" ? "#1f6fd0" : k==="w" ? "#ff5ea0" : "#ffb43a",
+    playerHit:"#ffd27a", spark:"#fff0b0",
+    drawBackground(st){
+      const sky=ctx.createLinearGradient(0,0,0,H);
+      sky.addColorStop(0,"#5a2a6e"); sky.addColorStop(.4,"#c0567a"); sky.addColorStop(.75,"#ff9e5a"); sky.addColorStop(1,"#ffd27a");
+      ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle="rgba(255,235,160,.9)"; ctx.beginPath(); ctx.arc(W*0.72,H*0.42,52,0,Math.PI*2); ctx.fill();
+      const cols=["#3a2150","#4a2a40","#5a2f30"];
+      st.mountains.forEach((m,i)=>{ ctx.fillStyle=cols[i]; const base=H-m.h*0.5;
+        ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(0,base);
+        for(let x=-300+(300-m.off);x<=W+300;x+=150){ ctx.lineTo(x,base);
+          ctx.quadraticCurveTo(x+37,base-m.h*0.5,x+75,base); ctx.lineTo(x+75,base); }
+        ctx.lineTo(W,base); ctx.lineTo(W,H); ctx.closePath(); ctx.fill(); });
+    },
+    drawFloater(f){ // マリーゴールドの花びら
+      const pal=["#ff9933","#ffcf2e","#ff5ea0"];
+      ctx.globalAlpha=0.6+f.z*0.2; ctx.fillStyle=pal[f.idx%pal.length];
+      ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.sway);
+      ctx.beginPath(); ctx.ellipse(0,0,f.size*0.8,f.size*0.5,0,0,Math.PI*2); ctx.fill();
+      ctx.restore(); ctx.globalAlpha=1;
+    },
+    drawPlayer(p,blink,frame){ // クジャク
+      const w=p.w,h=p.h,fan=Math.sin(frame*0.1)*0.15+0.85;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.globalAlpha=blink?0.4:1;
+      for(let i=-3;i<=3;i++){ const a=i*0.22*fan;
+        ctx.save(); ctx.rotate(a);
+        ctx.strokeStyle="#138808"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-w*0.1,0); ctx.lineTo(-w*0.9,0); ctx.stroke();
+        ctx.fillStyle="#1f6fd0"; ctx.beginPath(); ctx.arc(-w*0.9,0,5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#ffcf2e"; ctx.beginPath(); ctx.arc(-w*0.9,0,2,0,Math.PI*2); ctx.fill();
+        ctx.restore(); }
+      ctx.fillStyle="#1f6fd0"; ctx.beginPath(); ctx.ellipse(w*0.05,0,w*0.4,h*0.32,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(w*0.4,-4,6,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle="#138808"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(w*0.4,-10); ctx.lineTo(w*0.42,-16); ctx.stroke();
+      ctx.fillStyle="#138808"; ctx.beginPath(); ctx.arc(w*0.42,-16,2,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#ffcf2e"; ctx.beginPath(); ctx.moveTo(w*0.45,-4); ctx.lineTo(w*0.6,-2); ctx.lineTo(w*0.45,0); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha=1; ctx.restore();
+    },
+    drawEnemy(e){
+      ctx.save(); ctx.translate(e.x,e.y);
+      if(e.kind==="s"){ // ディヤ（灯明）
+        ctx.fillStyle="#ffb43a"; ctx.beginPath(); ctx.ellipse(0,e.h/4,e.w/2,e.h/3,0,0,Math.PI); ctx.fill();
+        ctx.fillStyle="#c77a1a"; ctx.beginPath(); ctx.ellipse(0,e.h/4,e.w/2,e.h/8,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#ff5e2e"; ctx.beginPath(); ctx.moveTo(0,e.h/8); ctx.quadraticCurveTo(6,-e.h/4,0,-e.h/2); ctx.quadraticCurveTo(-6,-e.h/4,0,e.h/8); ctx.fill();
+        ctx.fillStyle="#ffe14d"; ctx.beginPath(); ctx.ellipse(0,-e.h/6,2.5,5,0,0,Math.PI*2); ctx.fill();
+      } else if(e.kind==="w"){ // 蓮の花
+        ctx.fillStyle="#ff5ea0"; for(let i=0;i<8;i++){ ctx.save(); ctx.rotate(Math.PI*2/8*i+e.phase*0.5);
+          ctx.beginPath(); ctx.ellipse(0,-e.h/2.6,4,e.h/3,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+        ctx.fillStyle="#ffcf2e"; ctx.beginPath(); ctx.arc(0,0,e.w/5,0,Math.PI*2); ctx.fill();
+      } else { // アショーカ・チャクラ（法輪）
+        ctx.strokeStyle="#1f6fd0"; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.stroke();
+        ctx.lineWidth=2; for(let i=0;i<24;i++){ ctx.save(); ctx.rotate(Math.PI*2/24*i);
+          ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-e.w/2); ctx.stroke(); ctx.restore(); }
+        ctx.fillStyle="#1f6fd0"; ctx.beginPath(); ctx.arc(0,0,e.w/8,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    },
+    drawPlayerBullet(b){ // 矢
+      ctx.save(); ctx.translate(b.x,b.y);
+      ctx.strokeStyle="#caa24a"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-10,0); ctx.lineTo(8,0); ctx.stroke();
+      ctx.fillStyle="#dfe7ee"; ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(6,-4); ctx.lineTo(6,4); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle="#138808"; ctx.beginPath(); ctx.moveTo(-10,0); ctx.lineTo(-13,-3); ctx.moveTo(-10,0); ctx.lineTo(-13,3); ctx.stroke();
+      ctx.restore();
+    },
+    drawEnemyBullet(b){ const g=ctx.createRadialGradient(b.x,b.y,1,b.x,b.y,b.r+2);
+      g.addColorStop(0,"#fff"); g.addColorStop(.5,"#ff9933"); g.addColorStop(1,"rgba(200,90,20,0)");
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+2,0,Math.PI*2); ctx.fill(); }
+  }
+};
+
+let theme = THEMES.wafu;
+let themeKey = "wafu";
+
+function applyTheme(key) {
+  theme = THEMES[key];
+  themeKey = key;
+  const c = theme.css, r = document.documentElement.style;
+  r.setProperty("--page", c.page);
+  r.setProperty("--border", c.border);
+  r.setProperty("--paper", c.paper);
+  r.setProperty("--accent", c.accent);
+  r.setProperty("--text", c.text);
+  r.setProperty("--glow", c.glow);
+  r.setProperty("--font", c.font);
+  // セレクタのハイライト
+  [...selector.children].forEach(btn => btn.classList.toggle("active", btn.dataset.key === key));
+  // オーバーレイ表示中ならテキストも更新
+  if (!overlay.classList.contains("hidden")) refreshOverlayText();
+  tip.textContent = theme.ui.tip;
+}
+
+function refreshOverlayText() {
+  overlay.querySelector("h1").textContent = gameOver ? theme.ui.overTitle : theme.ui.title;
+  overlay.querySelector("p").innerHTML = gameOver
+    ? theme.ui.overText(score) + `<br>到達距離: <span class="key">${Math.floor(distance)}m</span>`
+    : theme.ui.instr;
+  startBtn.textContent = gameOver ? theme.ui.retry : theme.ui.start;
+}
+
+// テーマセレクタ生成
+for (const key of Object.keys(THEMES)) {
+  const btn = document.createElement("button");
+  btn.className = "themeBtn";
+  btn.dataset.key = key;
+  btn.textContent = THEMES[key].name;
+  btn.addEventListener("click", () => applyTheme(key));
+  selector.appendChild(btn);
+}
+
+// 難易度セレクタ生成
+const DIFFS = { normal: "通常モード", oni: "鬼モード（弾幕）" };
+for (const key of Object.keys(DIFFS)) {
+  const btn = document.createElement("button");
+  btn.className = "themeBtn";
+  btn.dataset.diff = key;
+  btn.textContent = DIFFS[key];
+  btn.addEventListener("click", () => setDifficulty(key));
+  diffSelector.appendChild(btn);
+}
+function setDifficulty(key) {
+  difficulty = key;
+  [...diffSelector.children].forEach(b => b.classList.toggle("active", b.dataset.diff === key));
+}
+setDifficulty("oni");
+
+function toggleAuto() {
+  autoPlay = !autoPlay;
+  autoToggle.textContent = `オートプレイ: ${autoPlay ? "ON" : "OFF"}　[ O ]`;
+  autoToggle.classList.toggle("active", autoPlay);
+}
+autoToggle.addEventListener("click", toggleAuto);
+
+// ============================================================
+//  入力
+// ============================================================
+const keys = {};
+addEventListener("keydown", e => {
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === " ") keys[" "] = true;
+  if (e.key.toLowerCase() === "t") {
+    const ks = Object.keys(THEMES);
+    const next = ks[(ks.indexOf(themeKey) + 1) % ks.length];
+    applyTheme(next);
+  }
+  if (e.key.toLowerCase() === "o" && !e.repeat) toggleAuto();
+});
+addEventListener("keyup", e => {
+  keys[e.key.toLowerCase()] = false;
+  if (e.key === " ") keys[" "] = false;
+});
+
+// ============================================================
+//  フェーズ定義 (弾幕モード用)
+// ============================================================
+// distance の閾値でフェーズが上がる。
+// 各フェーズで弾幕の密度・速度・パターン数が増加する。
+const PHASES = [
+  { phase:1, dist:0,     label:"第一幕", bulN:8,  bulSpd:2.0, spirN:4,  spirSpd:2.0, emitInterval:220, extraRing:false },
+  { phase:2, dist:3000,  label:"第二幕", bulN:12, bulSpd:2.5, spirN:5,  spirSpd:2.4, emitInterval:150, extraRing:true  },
+  { phase:3, dist:8000,  label:"第三幕", bulN:16, bulSpd:3.0, spirN:6,  spirSpd:2.8, emitInterval:90,  extraRing:true  },
+  { phase:4, dist:16000, label:"第四幕", bulN:20, bulSpd:3.6, spirN:8,  spirSpd:3.2, emitInterval:55,  extraRing:true  },
+];
+
+function getPhaseData(dist) {
+  let pd = PHASES[0];
+  for (const p of PHASES) { if (dist >= p.dist) pd = p; }
+  return pd;
+}
+
+// ============================================================
+//  ゲーム状態
+// ============================================================
+let player, bullets, enemies, enemyBullets, particles, floaters, mountains;
+let score, lives, frame, spawnTimer, running, gameOver, distance;
+let currentPhase, phaseAnnounce, danmakuEmitTimer, spiralAngle;
+// file:// で開くと localStorage アクセスが例外を投げる環境があるため、
+// 読み書きは必ず try/catch で包む。失敗時は最高記録を保持しないだけにとどめる。
+function loadBest() { try { return parseInt(localStorage.getItem("bestDist") || "0"); } catch { return 0; } }
+function saveBest(v) { try { localStorage.setItem("bestDist", String(v)); } catch {} }
+let bestDistance = loadBest();
+
+function reset() {
+  player = { x: 90, y: H/2, w: 44, h: 26, speed: 5, cooldown: 0, inv: 0 };
+  bullets = []; enemies = []; enemyBullets = []; particles = [];
+  floaters = [];
+  for (let i = 0; i < 60; i++) {
+    floaters.push({ x: Math.random()*W, y: Math.random()*H, z: 0.4+Math.random()*1.6,
+      sway: Math.random()*Math.PI*2, size: 4+Math.random()*5, idx: i });
+  }
+  mountains = [ {off:0,speed:0.3,h:150},{off:0,speed:0.6,h:110},{off:0,speed:1.0,h:80} ];
+  score = 0; lives = 3; frame = 0; spawnTimer = 0; gameOver = false; distance = 0;
+  currentPhase = 1; phaseAnnounce = null; danmakuEmitTimer = 0; spiralAngle = 0;
+}
+
+function spawnEnemy() {
+  const lv = Math.min(1, distance / 16000);
+  const spd = 1 + lv * 0.5;
+  const pS = 0.70 - lv * 0.35;
+  const pW = 0.92 - lv * 0.12;
+  const t = Math.random();
+  if (t < pS) {
+    enemies.push({ kind:"s", x:W+30, y:60+Math.random()*(H-220), w:32, h:38, hp:1,
+      speed:(2+Math.random()*1.5)*spd, shootTimer:60+Math.random()*60, bob:Math.random()*Math.PI*2 });
+  } else if (t < pW) {
+    const y = 100+Math.random()*(H-260);
+    enemies.push({ kind:"w", x:W+30, y, baseY:y, w:30, h:28, hp:2, speed:2.2*spd,
+      amp:50+Math.random()*40, phase:Math.random()*Math.PI*2, shootTimer:80+Math.random()*40 });
+  } else {
+    enemies.push({ kind:"b", x:W+50, y:80+Math.random()*(H-280), w:60, h:62, hp:6,
+      speed:1.1*spd, shootTimer:50 });
+  }
+}
+
+function pushB(x, y, vx, vy, r) { enemyBullets.push({ x, y, vx, vy, r: r||6 }); }
+
+function shootEnemy(e) {
+  const aimAng = Math.atan2(player.y - e.y, player.x - e.x);
+  if (difficulty === "oni") {
+    const pd = getPhaseData(distance);
+    if (e.kind === "s") {
+      // n-way 狙い弾: フェーズが上がるほど数と速度が増す
+      const ways = Math.min(2 + pd.phase, 5);
+      const spread = 0.28;
+      for (let i = 0; i < ways; i++) {
+        const off = (i - (ways-1)/2) * spread;
+        pushB(e.x, e.y, Math.cos(aimAng+off)*pd.bulSpd, Math.sin(aimAng+off)*pd.bulSpd);
+      }
+    } else if (e.kind === "w") {
+      // 全方位リング: フェーズで弾数・速度が増す
+      for (let i = 0; i < pd.bulN; i++) {
+        const a = Math.PI*2/pd.bulN*i + spiralAngle*0.3;
+        pushB(e.x, e.y, Math.cos(a)*pd.bulSpd, Math.sin(a)*pd.bulSpd);
+      }
+      // フェーズ3以上: 二重リング（速度違い）
+      if (pd.phase >= 3) {
+        for (let i = 0; i < pd.bulN/2; i++) {
+          const a = Math.PI*2/(pd.bulN/2)*i + spiralAngle*0.3 + Math.PI/pd.bulN;
+          pushB(e.x, e.y, Math.cos(a)*(pd.bulSpd*0.65), Math.sin(a)*(pd.bulSpd*0.65));
+        }
+      }
+    } else {
+      // らせん: フェーズで腕数・速度が増す
+      spiralAngle += 0.32;
+      for (let i = 0; i < pd.spirN; i++) {
+        const a = spiralAngle + Math.PI*2/pd.spirN*i;
+        pushB(e.x, e.y, Math.cos(a)*pd.spirSpd, Math.sin(a)*pd.spirSpd);
+      }
+      // フェーズ4: 逆回転らせんを同時発射
+      if (pd.phase >= 4) {
+        for (let i = 0; i < pd.spirN; i++) {
+          const a = -spiralAngle + Math.PI*2/pd.spirN*i + 0.15;
+          pushB(e.x, e.y, Math.cos(a)*(pd.spirSpd*0.8), Math.sin(a)*(pd.spirSpd*0.8));
+        }
+      }
+    }
+  } else {
+    // 通常モード: フェーズに応じて狙い弾の精度・速度が少し上がる
+    const lv = Math.min(1, distance/16000);
+    const spd = 3.0 + lv*1.2;
+    pushB(e.x, e.y, Math.cos(aimAng)*spd, Math.sin(aimAng)*spd);
+    if (lv > 0.5) {
+      // 遠距離では微妙にばらけた3wayになる
+      const off = 0.15;
+      pushB(e.x, e.y, Math.cos(aimAng-off)*spd*0.85, Math.sin(aimAng-off)*spd*0.85);
+      pushB(e.x, e.y, Math.cos(aimAng+off)*spd*0.85, Math.sin(aimAng+off)*spd*0.85);
+    }
+  }
+}
+
+// 敵とは独立した自律弾幕エミッター (鬼モード専用)
+function emitDanmaku() {
+  const pd = getPhaseData(distance);
+  const t = (frame * 0.01) % (Math.PI * 2);
+
+  // パターン: 画面右側の複数箇所から放射
+  const sources = [
+    { x: W * 0.75, y: H * 0.20 },
+    { x: W * 0.90, y: H * 0.50 },
+    { x: W * 0.75, y: H * 0.80 },
+  ];
+  // フェーズ3以上は画面中央右も追加
+  if (pd.phase >= 3) sources.push({ x: W * 0.60, y: H * 0.35 }, { x: W * 0.60, y: H * 0.65 });
+
+  const pattern = Math.floor(distance / 2000) % 4;
+
+  for (const src of sources) {
+    if (pattern === 0) {
+      // 全方位リング
+      for (let i = 0; i < pd.bulN; i++) {
+        const a = Math.PI*2/pd.bulN*i + t;
+        pushB(src.x, src.y, Math.cos(a)*pd.bulSpd, Math.sin(a)*pd.bulSpd, 5);
+      }
+    } else if (pattern === 1) {
+      // らせん（時計回り + 反時計回り）
+      for (let i = 0; i < pd.spirN; i++) {
+        const a = t*3 + Math.PI*2/pd.spirN*i;
+        pushB(src.x, src.y, Math.cos(a)*pd.spirSpd, Math.sin(a)*pd.spirSpd, 5);
+        if (pd.phase >= 2) {
+          const b = -t*2.5 + Math.PI*2/pd.spirN*i + 0.2;
+          pushB(src.x, src.y, Math.cos(b)*pd.spirSpd*0.75, Math.sin(b)*pd.spirSpd*0.75, 5);
+        }
+      }
+    } else if (pattern === 2) {
+      // 狙い弾扇: プレイヤー方向に向けたn-way
+      const aim = Math.atan2(player.y - src.y, player.x - src.x);
+      const ways = pd.bulN / 2;
+      for (let i = 0; i < ways; i++) {
+        const off = (i - (ways-1)/2) * 0.25;
+        pushB(src.x, src.y, Math.cos(aim+off)*pd.bulSpd, Math.sin(aim+off)*pd.bulSpd, 5);
+      }
+    } else {
+      // 密集リング（内・外2重）
+      for (let i = 0; i < pd.bulN; i++) {
+        const a = Math.PI*2/pd.bulN*i + t*2;
+        pushB(src.x, src.y, Math.cos(a)*pd.bulSpd, Math.sin(a)*pd.bulSpd, 5);
+        if (pd.extraRing) {
+          const b = Math.PI*2/pd.bulN*i - t*1.5;
+          pushB(src.x, src.y, Math.cos(b)*(pd.bulSpd*0.55), Math.sin(b)*(pd.bulSpd*0.55), 4);
+        }
+      }
+    }
+  }
+}
+
+// オートプレイ: 移動候補ごとに自機と弾の未来位置をシミュレートし、最も安全な方向を選ぶ
+const AI_DIRS = (() => {
+  const d = [[0,0]];
+  for (let i=0;i<16;i++){ const a = Math.PI*2/16*i; d.push([Math.cos(a), Math.sin(a)]); }
+  return d;
+})();
+
+function computeAI() {
+  const speed = player.speed;
+  const HORIZON = 30;
+  const STEP = 3;
+  const NEAR = 26;
+  const minX = 20, maxX = W*0.6, minY = 20, maxY = H-20;
+
+  let tgt = null, frontX = Infinity;
+  for (const e of enemies) { if (e.x > player.x && e.x < frontX) { frontX = e.x; tgt = e; } }
+  const aimX = W*0.18, aimY = tgt ? tgt.y : H/2;
+
+  let bestScore = Infinity, best = [0,0];
+  for (const [dx,dy] of AI_DIRS) {
+    let danger = 0, blocked = false;
+    for (let t=STEP; t<=HORIZON; t+=STEP) {
+      const nx = player.x + dx*speed*t;
+      const ny = player.y + dy*speed*t;
+      if (nx<minX || nx>maxX || ny<minY || ny>maxY) { blocked = true; break; }
+      const weight = 1 - (t/HORIZON)*0.5;
+      for (const b of enemyBullets) {
+        const bx = b.x + b.vx*t, by = b.y + b.vy*t;
+        const d = Math.hypot(nx-bx, ny-by);
+        if (d < NEAR) danger += (NEAR-d)/NEAR * weight * 3;
+      }
+      for (const e of enemies) {
+        const ex = e.x - e.speed*t;
+        const d = Math.hypot(nx-ex, ny-e.y);
+        if (d < 44) danger += (44-d)/44 * weight;
+      }
+    }
+    if (blocked) danger += 40;
+    const fx = player.x + dx*speed*8, fy = player.y + dy*speed*8;
+    const pref = Math.abs(fx-aimX)*0.004 + Math.abs(fy-aimY)*0.006 + ((dx||dy) ? 0.08 : 0);
+    const sc = danger + pref;
+    if (sc < bestScore) { bestScore = sc; best = [dx,dy]; }
+  }
+  return { mvx: best[0], mvy: best[1], firing: true };
+}
+
+function burst(x, y, color, n) {
+  for (let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, s=1+Math.random()*4;
+    particles.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, life:30, color }); }
+}
+
+// ============================================================
+//  更新
+// ============================================================
+function update() {
+  frame++;
+  distance += 0.8;
+  for (const m of mountains) m.off = (m.off + m.speed) % 300;
+
+  // フェーズ移行チェック
+  const pd = getPhaseData(distance);
+  if (pd.phase !== currentPhase) {
+    currentPhase = pd.phase;
+    phaseAnnounce = { label: pd.label, life: 180 };
+    // フェーズ移行時に画面フラッシュ用パーティクル
+    for (let i = 0; i < 30; i++) {
+      particles.push({ x: Math.random()*W, y: Math.random()*H,
+        vx: 0, vy: 0, life: 40 + Math.random()*20, color: theme.css.paper });
+    }
+  }
+  if (phaseAnnounce) phaseAnnounce.life--;
+  if (phaseAnnounce && phaseAnnounce.life <= 0) phaseAnnounce = null;
+
+  for (const f of floaters) {
+    f.sway += 0.04;
+    f.x -= f.z*1.3 + Math.sin(f.sway)*0.4;
+    f.y += Math.sin(f.sway)*0.6 + 0.2;
+    if (f.x < -10) { f.x = W+10; f.y = Math.random()*H; }
+    if (f.y > H+10) f.y = -10;
+  }
+
+  let mvx = 0, mvy = 0, firing = false;
+  if (autoPlay) {
+    const ai = computeAI(); mvx = ai.mvx; mvy = ai.mvy; firing = ai.firing;
+  } else {
+    if (keys["arrowup"]||keys["w"]) mvy -= 1;
+    if (keys["arrowdown"]||keys["s"]) mvy += 1;
+    if (keys["arrowleft"]||keys["a"]) mvx -= 1;
+    if (keys["arrowright"]||keys["d"]) mvx += 1;
+    firing = !!keys[" "];
+  }
+  player.x += mvx * player.speed;
+  player.y += mvy * player.speed;
+  player.x = Math.max(20, Math.min(W*0.6, player.x));
+  player.y = Math.max(20, Math.min(H-20, player.y));
+  if (player.inv > 0) player.inv--;
+
+  if (player.cooldown > 0) player.cooldown--;
+  if (firing && player.cooldown === 0) {
+    bullets.push({ x:player.x+player.w/2, y:player.y-5, vx:11, spin:0 });
+    bullets.push({ x:player.x+player.w/2, y:player.y+5, vx:11, spin:0 });
+    player.cooldown = 8;
+  }
+  for (const b of bullets) { b.x += b.vx; b.spin += 0.3; }
+  bullets = bullets.filter(b => b.x < W+20);
+
+  // 鬼モード: フェーズに応じた間隔で自律弾幕を発射
+  if (difficulty === "oni") {
+    danmakuEmitTimer--;
+    if (danmakuEmitTimer <= 0) {
+      emitDanmaku();
+      danmakuEmitTimer = pd.emitInterval;
+    }
+  }
+
+  spawnTimer--;
+  if (spawnTimer <= 0) {
+    const cap = (difficulty === "oni" ? 5 + pd.phase : 8) + (distance > 8000 ? 2 : 0);
+    if (enemies.length < cap) {
+      spawnEnemy();
+      if (difficulty === "oni") spawnTimer = Math.max(28, 95 - distance*0.005);
+      else spawnTimer = Math.max(22, 78 - distance*0.004);
+    } else {
+      spawnTimer = 18;
+    }
+  }
+
+  for (const e of enemies) {
+    e.x -= e.speed;
+    if (e.kind==="w") { e.phase += 0.05; e.y = e.baseY + Math.sin(e.phase)*e.amp; }
+    else if (e.kind==="s") e.bob += 0.1;
+    e.shootTimer--;
+    if (e.shootTimer <= 0 && e.x < W && e.x > 0) {
+      shootEnemy(e);
+      if (difficulty === "oni") e.shootTimer = e.kind==="b" ? Math.max(18, 34 - pd.phase*3) : e.kind==="w" ? Math.max(50, 96 - pd.phase*8) : Math.max(40, 78 - pd.phase*8);
+      else e.shootTimer = e.kind==="b" ? 45 : 110;
+    }
+  }
+  enemies = enemies.filter(e => e.x > -70);
+
+  for (const b of enemyBullets) { b.x += b.vx; b.y += b.vy; }
+  enemyBullets = enemyBullets.filter(b => b.x>-20 && b.x<W+20 && b.y>-20 && b.y<H+20);
+
+  for (const p of particles) { p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life--; }
+  particles = particles.filter(p => p.life > 0);
+
+  for (const b of bullets) {
+    for (const e of enemies) {
+      if (Math.abs(b.x-e.x) < e.w/2 && Math.abs(b.y-e.y) < e.h/2) {
+        e.hp--; b.dead = true; burst(b.x,b.y,theme.spark,4);
+        if (e.hp <= 0) { e.dead=true; burst(e.x,e.y,theme.enemyColor(e.kind),18);
+          score += e.kind==="b"?50:e.kind==="w"?20:10; }
+        break;
+      }
+    }
+  }
+  bullets = bullets.filter(b => !b.dead);
+  enemies = enemies.filter(e => !e.dead);
+
+  if (player.inv === 0) {
+    const hit = () => { lives--; player.inv = 90; burst(player.x,player.y,theme.playerHit,24); if (lives<=0) endGame(); };
+    for (const b of enemyBullets) {
+      if (Math.abs(b.x-player.x)<9 && Math.abs(b.y-player.y)<8){ b.dead=true; hit(); break; }
+    }
+    for (const e of enemies) {
+      if (Math.abs(e.x-player.x)<(e.w+player.w)/3 && Math.abs(e.y-player.y)<(e.h+player.h)/3){
+        e.dead=true; burst(e.x,e.y,theme.enemyColor(e.kind),14); hit(); break; }
+    }
+    enemyBullets = enemyBullets.filter(b => !b.dead);
+    enemies = enemies.filter(e => !e.dead);
+  }
+}
+
+// ============================================================
+//  描画
+// ============================================================
+function draw() {
+  theme.drawBackground({ frame, mountains });
+
+  // パーティクル
+  for (const p of particles) { ctx.globalAlpha = p.life/30; ctx.fillStyle = p.color; ctx.fillRect(p.x-2,p.y-2,4,4); }
+  ctx.globalAlpha = 1;
+
+  // 弾の色はテイスト・フェーズを問わず一律ウクライナ仕様(黄の麦穂・青の弾)で統一
+  const PB = THEMES.ukraine.drawPlayerBullet;
+  const EB = THEMES.ukraine.drawEnemyBullet;
+  // 自弾: 影を付けて背景から浮かせる
+  for (const b of bullets) {
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 5;
+    PB(b); ctx.restore();
+  }
+  // 敵弾: 濃い縁取り → 青の弾 → 白コア で常に視認できるように
+  for (const b of enemyBullets) {
+    ctx.fillStyle = "rgba(15,0,25,.85)";
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r+3, 0, Math.PI*2); ctx.fill();
+    EB(b);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r*0.45, 0, Math.PI*2); ctx.fill();
+  }
+
+  for (const e of enemies) theme.drawEnemy(e);
+  for (const f of floaters) theme.drawFloater(f);
+  const blink = player.inv > 0 && Math.floor(frame/4) % 2;
+  theme.drawPlayer(player, blink, frame);
+
+  // フェーズ移行アナウンス
+  if (phaseAnnounce) {
+    const life = phaseAnnounce.life;
+    const alpha = life > 120 ? (180 - life) / 60 : life / 120;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.font = `bold 48px ${theme.css.font}`;
+    ctx.textAlign = "center";
+    ctx.fillStyle = theme.css.paper;
+    ctx.shadowColor = theme.css.glow; ctx.shadowBlur = 30;
+    ctx.fillText(phaseAnnounce.label, W/2, H/2 - 10);
+    ctx.font = `22px ${theme.css.font}`;
+    ctx.fillStyle = theme.css.accent;
+    ctx.shadowBlur = 10;
+    ctx.fillText("難度上昇", W/2, H/2 + 30);
+    ctx.restore();
+  }
+
+  // HUD
+  const pd = getPhaseData(distance);
+  const phaseLabel = difficulty === "oni" ? ` [${pd.label}]` : "";
+  const tag = (difficulty === "oni" ? "鬼" : "通常") + (autoPlay ? " / AUTO" : "") + phaseLabel;
+  const best = Math.max(bestDistance, Math.floor(distance));
+  hud.innerHTML = `距離 ${Math.floor(distance)}m&nbsp;&nbsp;${theme.ui.scoreLabel} ${String(score).padStart(6,"0")}&nbsp;&nbsp;${theme.ui.livesLabel} ${theme.ui.lifeIcon.repeat(Math.max(0,lives))}&nbsp;&nbsp;[${tag}]<br><span style="font-size:13px;opacity:.7">最高 ${best}m</span>`;
+}
+
+// ============================================================
+//  ループ
+// ============================================================
+// 1フレームあたりの更新回数。上げるとプレイ全体が比例して速くなる。
+const SPEED_STEPS = 2;
+function loop() {
+  if (!running) return;
+  for (let i = 0; i < SPEED_STEPS && running; i++) update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function startGame() {
+  reset(); running = true;
+  overlay.classList.add("hidden");
+  loop();
+}
+
+function endGame() {
+  running = false; gameOver = true;
+  const dist = Math.floor(distance);
+  if (dist > bestDistance) {
+    bestDistance = dist;
+    saveBest(dist);
+  }
+  refreshOverlayText();
+  overlay.classList.remove("hidden");
+}
+
+startBtn.addEventListener("click", startGame);
+
+// 初期化
+autoToggle.textContent = `オートプレイ: ${autoPlay ? "ON" : "OFF"}　[ O ]`;
+autoToggle.classList.toggle("active", autoPlay);
+applyTheme("wafu");
+refreshOverlayText();
+</script>
+</body>
+</html>

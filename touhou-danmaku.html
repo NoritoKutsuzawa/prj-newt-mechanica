@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>幻想弾幕 — Touhou-style Danmaku</title>
+<style>
+  :root {
+    --bg: #05060f;
+    --bg2: #131a3a;
+    --canvasBg: #02030a;
+    --panel: #0c1024;
+    --line: #2a2f5a;
+    --accent: #8ad7ff;
+    --accent2: #ff7ab0;
+    --gold: #ffd95d;
+    --text: #dfe7ff;
+    --dim: #6f78a8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(circle at 50% 20%, var(--bg2) 0%, var(--bg) 70%);
+    transition: background .4s;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    color: var(--text); user-select: none;
+  }
+  #wrap { position: relative; display: flex; gap: 14px; align-items: flex-start; }
+  #stage { position: relative; }
+  canvas {
+    display: block;
+    background: var(--canvasBg);
+    border: 2px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 0 60px rgba(80,120,255,.25), inset 0 0 60px rgba(0,0,0,.6);
+    transition: border-color .4s;
+  }
+  /* HUD: キャンバス左上に重ねる */
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 8px 12px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    font-size: 13px; letter-spacing: 1px; pointer-events: none;
+    text-shadow: 0 0 6px #000, 0 1px 2px #000;
+  }
+  #hud .col { display: flex; flex-direction: column; gap: 3px; }
+  #hud .label { color: var(--dim); font-size: 10px; letter-spacing: 2px; }
+  #hud .val { font-size: 17px; font-weight: 700; color: var(--text); }
+  #hud .score .val { color: var(--gold); }
+  #hud .graze .val { color: var(--accent); }
+  #icons { font-size: 16px; letter-spacing: 2px; }
+  #icons .life { color: var(--accent2); }
+  #icons .bomb { color: var(--gold); }
+  #autoBadge {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; letter-spacing: 3px; font-weight: 700;
+    color: #051018; background: var(--accent); padding: 3px 12px; border-radius: 12px;
+    box-shadow: 0 0 16px var(--accent); pointer-events: none;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:.75} 50%{opacity:1} }
+  /* ボス情報バー */
+  #bossbar {
+    position: absolute; top: 34px; left: 12px; right: 12px;
+    pointer-events: none;
+  }
+  #bossbar .name { font-size: 11px; letter-spacing: 2px; color: var(--accent2); text-shadow: 0 0 6px #000; }
+  #bossbar .track { height: 5px; margin-top: 3px; background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; }
+  #bossbar .fill { height: 100%; width: 100%; background: linear-gradient(90deg,var(--accent2),var(--gold)); transition: width .08s linear; }
+  #bossbar .stars { font-size: 10px; color: var(--gold); margin-top: 2px; letter-spacing: 2px; }
+  /* オーバーレイ */
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; text-align: center;
+    background: radial-gradient(circle at 50% 40%, rgba(18,24,58,.45), rgba(2,3,10,.78));
+    border-radius: 6px;
+  }
+  #overlay h1 {
+    margin: 0; font-size: 30px; letter-spacing: 6px; color: #fff;
+    text-shadow: 0 0 18px var(--accent2), 0 0 40px var(--accent);
+  }
+  #overlay .sub { font-size: 13px; color: var(--accent); letter-spacing: 3px; margin-top: -6px; text-shadow: 0 1px 6px #000, 0 0 10px #000; }
+  #overlay p { margin: 0; font-size: 13px; line-height: 1.9; color: var(--text); text-shadow: 0 1px 6px #000, 0 0 10px #000; }
+  #overlay .key { color: var(--gold); font-weight: 700; }
+  #overlay .stat { color: var(--accent); font-weight: 700; font-size: 18px; }
+  #startBtn {
+    margin-top: 8px; padding: 12px 36px; font-size: 17px; font-weight: 700; letter-spacing: 3px;
+    color: #051018; background: var(--accent); border: none; border-radius: 6px; cursor: pointer;
+    box-shadow: 0 0 20px var(--accent); font-family: inherit;
+  }
+  #startBtn:hover { filter: brightness(1.12); }
+  .autobtn {
+    padding: 8px 18px; font-size: 13px; letter-spacing: 2px; cursor: pointer; font-family: inherit;
+    background: transparent; color: var(--text); border: 2px solid var(--line); border-radius: 6px;
+    transition: .15s;
+  }
+  .autobtn.on { background: var(--accent); color: #051018; border-color: var(--accent); box-shadow: 0 0 16px var(--accent); font-weight: 700; }
+  /* テイスト選択 */
+  #selector { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 2px; }
+  .themeBtn {
+    padding: 7px 16px; font-size: 13px; letter-spacing: 1px; cursor: pointer; font-family: inherit;
+    background: transparent; color: var(--text); border: 2px solid var(--line); border-radius: 6px;
+    opacity: .55; transition: .15s;
+  }
+  .themeBtn:hover { opacity: .85; }
+  .themeBtn.active { opacity: 1; background: var(--gold); color: #1a1320; border-color: var(--gold); font-weight: 700; }
+  .hidden { display: none !important; }
+  /* 操作ヘルプ（右側パネル） */
+  #help {
+    width: 180px; padding: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    font-size: 12px; line-height: 1.7; color: var(--dim);
+  }
+  #help h2 { font-size: 12px; letter-spacing: 2px; color: var(--accent); margin: 0 0 8px; }
+  #help table { width: 100%; border-collapse: collapse; }
+  #help td { padding: 2px 0; vertical-align: top; }
+  #help td.k { color: var(--gold); font-weight: 700; white-space: nowrap; padding-right: 8px; }
+  #help .note { margin-top: 12px; font-size: 11px; color: var(--dim); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="game" width="480" height="720"></canvas>
+    <div id="hud">
+      <div class="col">
+        <div class="score"><span class="label" id="lblScore">SCORE</span><span class="val" id="hScore">0</span></div>
+        <div class="graze"><span class="label" id="lblGraze">GRAZE</span><span class="val" id="hGraze">0</span></div>
+      </div>
+      <div class="col" style="align-items:flex-end">
+        <div><span class="label" id="lblLife">LIFE</span> <span id="hLife" class="icons life"></span></div>
+        <div><span class="label" id="lblBomb">BOMB</span> <span id="hBomb" class="icons bomb"></span></div>
+      </div>
+    </div>
+    <div id="autoBadge" class="hidden">◆ AUTO PILOT ◆</div>
+    <div id="bossbar" class="hidden">
+      <div class="name" id="bossName"></div>
+      <div class="track"><div class="fill" id="bossFill"></div></div>
+      <div class="stars" id="bossStars"></div>
+    </div>
+    <div id="overlay">
+      <h1 id="ovTitle">幻 想 弾 幕</h1>
+      <div class="sub" id="ovSub">TOUHOU-STYLE DANMAKU</div>
+      <p id="ovText"></p>
+      <div id="selector"></div>
+      <button id="autoBtn" class="autobtn on">オートプレイ: ON　[ A ]</button>
+      <button id="startBtn">は じ め る</button>
+    </div>
+  </div>
+  <div id="help">
+    <h2 id="helpTitle">操作</h2>
+    <table>
+      <tr><td class="k">← ↑ ↓ →</td><td>移動</td></tr>
+      <tr><td class="k">WASD</td><td>移動</td></tr>
+      <tr><td class="k">Z</td><td>ショット</td></tr>
+      <tr><td class="k">Shift</td><td>低速移動<br>(当たり判定が見える)</td></tr>
+      <tr><td class="k">Space</td><td>ボム</td></tr>
+      <tr><td class="k">A</td><td>オートプレイ</td></tr>
+    </table>
+    <div class="note" id="helpNote">
+      オートプレイは無敵ではない。プレイヤーと同じルールで弾を避ける。眺めて楽しむデモプレイ。
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ============================================================
+//  幻想弾幕 — HTML5単体の東方Project風 縦画面弾幕シューティング
+//  観賞性を最重視。オートプレイは無敵ではなく人間らしく避ける。
+// ============================================================
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+
+// 弾の色パレット。白コア＋色グローでスプライト化して描画する。
+const PAL = {
+  red:    "#ff4d6d",
+  blue:   "#4db5ff",
+  purple: "#b06dff",
+  green:  "#5dffa0",
+  gold:   "#ffd95d",
+  cyan:   "#71f0ff",
+};
+
+// ------------------------------------------------------------
+//  汎用ユーティリティ
+// ------------------------------------------------------------
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+const TAU = Math.PI * 2;
+
+// 5芒星のパスを引く描画ヘルパー。テイストの装飾で使う
+function star5(g, x, y, R, r) {
+  g.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rad = i % 2 ? r : R;
+    const a = Math.PI / 5 * i - Math.PI / 2;
+    const px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+    i ? g.lineTo(px, py) : g.moveTo(px, py);
+  }
+  g.closePath();
+}
+
+// 当たり判定点の表示。ゲーム挙動に直結するためテイストに依らず全テーマ共通にする
+function drawHitbox(g, p) {
+  const showR = p.slow ? p.hitR * 1.8 : p.hitR;
+  g.save();
+  g.translate(p.x, p.y);
+  if (p.slow) {
+    g.strokeStyle = "rgba(140,215,255,.9)"; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(0, 0, p.grazeR, p.frame * 0.05, p.frame * 0.05 + Math.PI * 1.4); g.stroke();
+  }
+  g.fillStyle = p.slow ? "#fff" : "rgba(255,255,255,.85)";
+  g.shadowColor = "#8ad7ff"; g.shadowBlur = 8;
+  g.beginPath(); g.arc(0, 0, showR, 0, TAU); g.fill();
+  g.restore();
+}
+
+// ============================================================
+//  テイスト定義 (THEMES)
+//  見た目(背景・自機・ボス・自機弾・配色・UI文言)だけを切り替える。
+//  敵弾の色(PAL)・弾幕パターン・AI・難易度・当たり判定は全テイスト共通。
+//  新テイストはこのテーブルに1項目追加するだけで増やせる。
+// ============================================================
+const THEMES = {
+  // ---------- 和風 ----------
+  wafu: {
+    name: "和風",
+    css: { bg:"#070611", bg2:"#1a1430", canvas:"#05040c", panel:"#140f22", line:"#5a4332",
+           accent:"#ffd27a", accent2:"#ff7a9c", gold:"#ffd95d", text:"#f3e9d2", dim:"#9a8a78" },
+    star: { near:"#ffe6c0", far:"#8a7ab0" },
+    spells: ["「回転円形 ・ 螺華繚乱」","「双螺旋 ・ 渦動の咲」","「月隙 ・ 廻る欠片」","「流星 ・ 降り注ぐ夜」"],
+    ui: {
+      title:"幻 想 弾 幕", sub:"巫女と妖の宴",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> で移動<br>'
+          + '<span class="key">Z</span> 札を放つ　<span class="key">Shift</span> 低速<br>'
+          + '<span class="key">Space</span> 結界（ボム）　<span class="key">A</span> オート切替<br>'
+          + '被弾三度で夢から覚める。掠って功徳を積め。',
+      start:"は じ め る", retry:"も う 一 度", overTitle:"夢 か ら 覚 む",
+      overText:(s,c,g)=>`祓いし術: <span class="stat">${c}</span>　功徳: <span class="stat">${s.toLocaleString()}</span><br>掠り: <span class="stat">${g}</span><br>いま一度 幻想の弾幕へ。`,
+      scoreLabel:"功徳", grazeLabel:"掠り", lifeLabel:"残機", bombLabel:"結界",
+      lifeIcon:"♥", bombIcon:"✦", autoWord:"オートプレイ", autoBadge:"◆ オート演武 ◆",
+      helpTitle:"操作", helpNote:"オートプレイは無敵ではない。同じ規則で弾を避ける。眺めて愛でる演武。",
+      bannerColor:"#ff7a9c",
+    },
+    drawBackground(g, game) {
+      const bg = g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#1a1430"); bg.addColorStop(.5,"#0e0a1e"); bg.addColorStop(1,"#070611");
+      g.fillStyle = bg; g.fillRect(-20,-20,W+40,H+40);
+      // 月
+      const mx=W*0.74, my=H*0.18, mr=44;
+      const mg=g.createRadialGradient(mx,my,4,mx,my,mr*1.7);
+      mg.addColorStop(0,"rgba(255,242,205,.95)"); mg.addColorStop(.6,"rgba(255,230,170,.45)"); mg.addColorStop(1,"rgba(255,230,170,0)");
+      g.fillStyle=mg; g.beginPath(); g.arc(mx,my,mr*1.7,0,TAU); g.fill();
+      g.fillStyle="#fff6da"; g.beginPath(); g.arc(mx,my,mr,0,TAU); g.fill();
+      // たなびく雲
+      g.globalAlpha=.16; g.fillStyle="#2c2148";
+      for (let i=0;i<3;i++){ g.beginPath(); g.ellipse(W*0.5, H*0.30+i*38, W*0.72, 14, 0,0,TAU); g.fill(); }
+      g.globalAlpha=1;
+    },
+    drawPlayer(g, p) {
+      const r=p.r, blink=p.inv>0 && (p.frame>>2)%2===0;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      g.fillStyle="#f4f7ff";
+      g.beginPath(); g.moveTo(0,-r);
+      g.quadraticCurveTo(r*0.9,r*0.5,r*0.45,r*0.9); g.lineTo(-r*0.45,r*0.9);
+      g.quadraticCurveTo(-r*0.9,r*0.5,0,-r); g.closePath(); g.fill();
+      g.fillStyle="#ff5d7d";
+      g.beginPath(); g.moveTo(0,-r*0.7); g.lineTo(r*0.5,r*0.7); g.lineTo(-r*0.5,r*0.7); g.closePath(); g.fill();
+      g.fillStyle="rgba(255,210,150,.85)";
+      g.beginPath(); g.ellipse(0,r*0.9,4,6+Math.sin(p.frame*0.5)*2,0,0,TAU); g.fill();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.2);
+      aura.addColorStop(0,"rgba(255,160,90,.32)"); aura.addColorStop(1,"rgba(255,160,90,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.2,0,TAU); g.fill();
+      g.strokeStyle="rgba(255,200,120,.6)"; g.lineWidth=2;
+      for (let ring=0; ring<2; ring++){
+        const rr=b.r*(1.4+ring*0.35);
+        g.save(); g.rotate(b.t*(ring%2?-0.02:0.03)); g.beginPath();
+        for (let i=0;i<=6;i++){ const a=TAU/6*i; const px=Math.cos(a)*rr, py=Math.sin(a)*rr; i?g.lineTo(px,py):g.moveTo(px,py); }
+        g.closePath(); g.stroke(); g.restore();
+      }
+      const body=g.createRadialGradient(-8,-8,4,0,0,b.r);
+      body.addColorStop(0,b.flash>0?"#ffffff":"#ffd2e2"); body.addColorStop(1,b.flash>0?"#ffd2e2":"#c83a78");
+      g.fillStyle=body; g.beginPath(); g.arc(0,0,b.r,0,TAU); g.fill();
+      g.fillStyle="#2a0a18";
+      g.beginPath(); g.arc(-9,-3,5,0,TAU); g.fill(); g.beginPath(); g.arc(9,-3,5,0,TAU); g.fill();
+      g.fillStyle="#fff";
+      g.beginPath(); g.arc(-7,-5,1.6,0,TAU); g.fill(); g.beginPath(); g.arc(11,-5,1.6,0,TAU); g.fill();
+      g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      g.fillStyle="#fff7e6"; g.fillRect(-3,-9,6,18);
+      g.fillStyle="#ff6a6a"; g.fillRect(-3,-9,6,4);
+      g.restore();
+    },
+  },
+
+  // ---------- アメリカ風 ----------
+  usa: {
+    name: "アメリカ風",
+    css: { bg:"#04060f", bg2:"#0a1838", canvas:"#02040c", panel:"#0a1228", line:"#2a3a6a",
+           accent:"#5aa0ff", accent2:"#ff5a6e", gold:"#ffffff", text:"#eaf0ff", dim:"#7088b8" },
+    star: { near:"#ffffff", far:"#88a0d0" },
+    spells: ["★ Spinning Stars ★","★ Twin Vortex ★","★ Lunar Gap ★","★ Meteor Storm ★"],
+    ui: {
+      title:"PHANTOM BARRAGE", sub:"STARS & STRIPES",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> to move<br>'
+          + '<span class="key">Z</span> Shoot　<span class="key">Shift</span> Focus<br>'
+          + '<span class="key">Space</span> Bomb　<span class="key">A</span> Autopilot<br>'
+          + "Three hits and it's over. Graze for score.",
+      start:"START", retry:"RETRY", overTitle:"GAME OVER",
+      overText:(s,c,g)=>`Spells: <span class="stat">${c}</span>　Score: <span class="stat">${s.toLocaleString()}</span><br>Graze: <span class="stat">${g}</span><br>Insert coin to try again.`,
+      scoreLabel:"SCORE", grazeLabel:"GRAZE", lifeLabel:"LIFE", bombLabel:"BOMB",
+      lifeIcon:"♥", bombIcon:"★", autoWord:"AUTOPILOT", autoBadge:"◆ AUTO PILOT ◆",
+      helpTitle:"CONTROLS", helpNote:"Autopilot isn't invincible. It dodges by the same rules. Sit back and watch.",
+      bannerColor:"#ff5a6e",
+    },
+    drawBackground(g, game) {
+      const bg=g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#0a1838"); bg.addColorStop(.5,"#070e22"); bg.addColorStop(1,"#02040c");
+      g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+      g.globalAlpha=.22;
+      const n1=g.createRadialGradient(W*0.3,H*0.25,10,W*0.3,H*0.25,W*0.6);
+      n1.addColorStop(0,"rgba(80,140,255,.7)"); n1.addColorStop(1,"rgba(0,0,0,0)");
+      g.fillStyle=n1; g.fillRect(0,0,W,H);
+      const n2=g.createRadialGradient(W*0.75,H*0.5,10,W*0.75,H*0.5,W*0.55);
+      n2.addColorStop(0,"rgba(255,80,110,.6)"); n2.addColorStop(1,"rgba(0,0,0,0)");
+      g.fillStyle=n2; g.fillRect(0,0,W,H);
+      g.globalAlpha=1;
+      // 大きな星をいくつか瞬かせる
+      const pts=[[W*0.15,H*0.14],[W*0.86,H*0.2],[W*0.5,H*0.07],[W*0.92,H*0.62],[W*0.08,H*0.5]];
+      pts.forEach((s,i)=>{ const tw=0.55+0.45*Math.sin(game.clock*0.05+i*1.7);
+        g.fillStyle="rgba(255,255,255,"+(0.5*tw).toFixed(2)+")"; star5(g,s[0],s[1],9*tw,3.6*tw); g.fill(); });
+    },
+    drawPlayer(g, p) {
+      const r=p.r, blink=p.inv>0 && (p.frame>>2)%2===0;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      g.fillStyle="#2f5fd0";
+      g.beginPath(); g.moveTo(0,-r); g.lineTo(r*0.35,r*0.6); g.lineTo(0,r*0.4); g.lineTo(-r*0.35,r*0.6); g.closePath(); g.fill();
+      g.fillStyle="#eef3ff";
+      g.beginPath(); g.moveTo(0,-r*0.1); g.lineTo(r*0.95,r*0.55); g.lineTo(r*0.2,r*0.2); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0,-r*0.1); g.lineTo(-r*0.95,r*0.55); g.lineTo(-r*0.2,r*0.2); g.closePath(); g.fill();
+      g.fillStyle="#ff5a6e"; star5(g,0,-r*0.05,r*0.28,r*0.12); g.fill();
+      g.fillStyle="rgba(120,200,255,.9)"; const fl=6+Math.sin(p.frame*0.6)*3;
+      g.beginPath(); g.ellipse(-r*0.18,r*0.55,3,fl,0,0,TAU); g.fill();
+      g.beginPath(); g.ellipse(r*0.18,r*0.55,3,fl,0,0,TAU); g.fill();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.2);
+      aura.addColorStop(0,"rgba(90,160,255,.35)"); aura.addColorStop(1,"rgba(90,160,255,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.2,0,TAU); g.fill();
+      g.save(); g.rotate(b.t*0.03);
+      for (let i=0;i<12;i++){ const a=TAU/12*i; const lx=Math.cos(a)*b.r*1.5, ly=Math.sin(a)*b.r*1.5;
+        g.fillStyle=i%2?"#ff5a6e":"#5aa0ff"; g.beginPath(); g.arc(lx,ly,3,0,TAU); g.fill(); }
+      g.restore();
+      g.fillStyle=b.flash>0?"#ffffff":"#8fa6cc";
+      g.beginPath(); g.ellipse(0,b.r*0.25,b.r*1.25,b.r*0.5,0,0,TAU); g.fill();
+      const dome=g.createRadialGradient(-b.r*0.2,-b.r*0.25,4,0,0,b.r);
+      dome.addColorStop(0,"rgba(190,235,255,.95)"); dome.addColorStop(1,"rgba(80,140,220,.7)");
+      g.fillStyle=dome; g.beginPath(); g.arc(0,0,b.r*0.78,Math.PI,0); g.fill();
+      g.fillStyle=b.flash>0?"#fff":"#ff5a6e"; g.beginPath(); g.arc(0,-b.r*0.1,5,0,TAU); g.fill();
+      g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.globalAlpha=0.95;
+      g.fillStyle="#9fd0ff"; g.beginPath(); g.ellipse(b.x,b.y,2.5,10,0,0,TAU); g.fill();
+      g.fillStyle="#fff"; g.beginPath(); g.ellipse(b.x,b.y,1.2,7,0,0,TAU); g.fill();
+      g.globalAlpha=1; g.restore();
+    },
+  },
+
+  // ---------- ペルー風 ----------
+  peru: {
+    name: "ペルー風",
+    css: { bg:"#070414", bg2:"#2a1840", canvas:"#070414", panel:"#160f24", line:"#a85a2a",
+           accent:"#ffb43a", accent2:"#ff5a8a", gold:"#ffd24a", text:"#fff0d8", dim:"#a88a6a" },
+    star: { near:"#ffd9a0", far:"#a07ab0" },
+    spells: ["✦ Estrellas Giratorias ✦","✦ Doble Espiral ✦","✦ Eclipse Lunar ✦","✦ Lluvia de Meteoros ✦"],
+    ui: {
+      title:"DANMAKU ANDINO", sub:"EL CÓNDOR PASA",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> para volar<br>'
+          + '<span class="key">Z</span> Disparar　<span class="key">Shift</span> Lento<br>'
+          + '<span class="key">Space</span> Bomba　<span class="key">A</span> Piloto auto<br>'
+          + "Tres caídas y termina. Roza para más puntos.",
+      start:"¡VAMOS!", retry:"OTRA VEZ", overTitle:"FIN DEL VUELO",
+      overText:(s,c,g)=>`Hechizos: <span class="stat">${c}</span>　Puntos: <span class="stat">${s.toLocaleString()}</span><br>Roce: <span class="stat">${g}</span><br>Alza el vuelo una vez más.`,
+      scoreLabel:"Puntos", grazeLabel:"Roce", lifeLabel:"Vidas", bombLabel:"Bomba",
+      lifeIcon:"✦", bombIcon:"☀", autoWord:"PILOTO AUTO", autoBadge:"◆ PILOTO AUTO ◆",
+      helpTitle:"CONTROLES", helpNote:"El piloto auto no es invencible. Esquiva con las mismas reglas. Disfruta el vuelo.",
+      bannerColor:"#ff5a8a",
+    },
+    drawBackground(g, game) {
+      const bg=g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#2a1840"); bg.addColorStop(.45,"#1a1030"); bg.addColorStop(1,"#070414");
+      g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+      // インティ（太陽神）
+      const sx=W*0.5, sy=H*0.15, R=38;
+      g.save(); g.translate(sx,sy);
+      const sg=g.createRadialGradient(0,0,6,0,0,R*2.2);
+      sg.addColorStop(0,"rgba(255,210,90,.85)"); sg.addColorStop(.5,"rgba(255,170,60,.3)"); sg.addColorStop(1,"rgba(255,170,60,0)");
+      g.fillStyle=sg; g.beginPath(); g.arc(0,0,R*2.2,0,TAU); g.fill();
+      g.fillStyle="rgba(255,200,70,.4)"; g.rotate(game.clock*0.004);
+      for (let i=0;i<16;i++){ g.rotate(TAU/16); g.beginPath(); g.moveTo(R,0); g.lineTo(R+16,-4); g.lineTo(R+16,4); g.closePath(); g.fill(); }
+      g.restore();
+      // アンデスの山並み（画面最下部に控えめ）
+      g.fillStyle="rgba(36,22,14,.9)";
+      g.beginPath(); g.moveTo(0,H);
+      for (let x=-40;x<=W+40;x+=110){ g.lineTo(x,H-12); g.lineTo(x+55,H-52); g.lineTo(x+110,H-12); }
+      g.lineTo(W,H); g.closePath(); g.fill();
+    },
+    drawPlayer(g, p) {
+      const r=p.r, blink=p.inv>0 && (p.frame>>2)%2===0, flap=Math.sin(p.frame*0.2)*0.4;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      g.fillStyle="#2b2b30";
+      g.beginPath(); g.moveTo(0,-r*0.1); g.lineTo(-r*0.95,-r*0.2-flap*r*0.5); g.lineTo(-r*0.2,r*0.25); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0,-r*0.1); g.lineTo(r*0.95,-r*0.2-flap*r*0.5); g.lineTo(r*0.2,r*0.25); g.closePath(); g.fill();
+      g.beginPath(); g.ellipse(0,r*0.05,r*0.3,r*0.55,0,0,TAU); g.fill();
+      g.fillStyle="#f2efe6"; g.beginPath(); g.ellipse(0,-r*0.35,6,5,0,0,TAU); g.fill();
+      g.fillStyle="#2b2b30"; g.beginPath(); g.arc(0,-r*0.55,5,0,TAU); g.fill();
+      g.fillStyle="#e8a23a"; g.beginPath(); g.moveTo(-3,-r*0.62); g.lineTo(0,-r*0.9); g.lineTo(3,-r*0.62); g.closePath(); g.fill();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.4);
+      aura.addColorStop(0,"rgba(255,190,70,.4)"); aura.addColorStop(1,"rgba(255,190,70,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.4,0,TAU); g.fill();
+      g.save(); g.rotate(b.t*0.02); g.fillStyle="#ffc23a";
+      for (let i=0;i<16;i++){ g.rotate(TAU/16); g.beginPath(); g.moveTo(b.r,0); g.lineTo(b.r+20,-6); g.lineTo(b.r+20,6); g.closePath(); g.fill(); }
+      g.restore();
+      g.fillStyle=b.flash>0?"#fff6d0":"#e8b53a"; g.beginPath(); g.arc(0,0,b.r,0,TAU); g.fill();
+      g.fillStyle="#7a4a10";
+      g.fillRect(-b.r*0.45,-b.r*0.25,b.r*0.3,b.r*0.18); g.fillRect(b.r*0.15,-b.r*0.25,b.r*0.3,b.r*0.18);
+      g.beginPath(); g.moveTo(0,-b.r*0.05); g.lineTo(-b.r*0.12,b.r*0.2); g.lineTo(b.r*0.12,b.r*0.2); g.closePath(); g.fill();
+      g.fillRect(-b.r*0.3,b.r*0.4,b.r*0.6,b.r*0.12);
+      g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      g.fillStyle="#f2efe6"; g.beginPath(); g.ellipse(0,0,3.5,9,0,0,TAU); g.fill();
+      g.strokeStyle="rgba(150,110,50,.8)"; g.lineWidth=1;
+      g.beginPath(); g.moveTo(0,-8); g.lineTo(0,8); g.stroke();
+      g.restore();
+    },
+  },
+
+  // ---------- ウクライナ風 ----------
+  ukraine: {
+    name: "ウクライナ風",
+    css: { bg:"#06101f", bg2:"#0d2440", canvas:"#040a16", panel:"#0a182c", line:"#b8860b",
+           accent:"#ffd24a", accent2:"#4aa0ff", gold:"#ffd24a", text:"#eaf3ff", dim:"#7a90b0" },
+    star: { near:"#ffe89a", far:"#7a90c0" },
+    spells: ["✦ Зоряне Коло ✦","✦ Подвійна Спіраль ✦","✦ Місячна Щілина ✦","✦ Зорепад ✦"],
+    ui: {
+      title:"ПОЛІТ ЛЕЛЕКИ", sub:"БЛАКИТЬ І ЗОЛОТО",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> — рух<br>'
+          + '<span class="key">Z</span> Постріл　<span class="key">Shift</span> Повільно<br>'
+          + '<span class="key">Space</span> Бомба　<span class="key">A</span> Автопілот<br>'
+          + 'Три влучання — і кінець. Торкайся куль заради очок.',
+      start:"ПОЧАТИ", retry:"ЩЕ РАЗ", overTitle:"КІНЕЦЬ",
+      overText:(s,c,g)=>`Закляття: <span class="stat">${c}</span>　Очки: <span class="stat">${s.toLocaleString()}</span><br>Дотик: <span class="stat">${g}</span><br>Здіймімося в небо ще раз.`,
+      scoreLabel:"Очки", grazeLabel:"Дотик", lifeLabel:"Життя", bombLabel:"Бомба",
+      lifeIcon:"❀", bombIcon:"✦", autoWord:"Автопілот", autoBadge:"◆ АВТОПІЛОТ ◆",
+      helpTitle:"Керування", helpNote:"Автопілот не безсмертний. Ухиляється за тими ж правилами. Просто спостерігай.",
+      bannerColor:"#4aa0ff",
+    },
+    drawBackground(g, game) {
+      const bg=g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#0d2440"); bg.addColorStop(.5,"#08182e"); bg.addColorStop(1,"#06101f");
+      g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+      const mx=W*0.76, my=H*0.18, mr=40;
+      const mg=g.createRadialGradient(mx,my,4,mx,my,mr*1.7);
+      mg.addColorStop(0,"rgba(255,245,200,.9)"); mg.addColorStop(.6,"rgba(255,235,160,.4)"); mg.addColorStop(1,"rgba(255,235,160,0)");
+      g.fillStyle=mg; g.beginPath(); g.arc(mx,my,mr*1.7,0,TAU); g.fill();
+      g.fillStyle="#fff3c8"; g.beginPath(); g.arc(mx,my,mr,0,TAU); g.fill();
+      // 最下部に黄金の麦穂のシルエット
+      for (let x=8;x<W;x+=18){
+        const sway=Math.sin(game.clock*0.02+x)*4;
+        g.strokeStyle="rgba(180,130,20,.55)"; g.lineWidth=2;
+        g.beginPath(); g.moveTo(x,H); g.lineTo(x+sway,H-46); g.stroke();
+        g.fillStyle="rgba(210,160,30,.55)"; g.beginPath(); g.ellipse(x+sway,H-50,3,7,0,0,TAU); g.fill();
+      }
+    },
+    drawPlayer(g, p) {
+      const blink=p.inv>0 && (p.frame>>2)%2===0, flap=Math.sin(p.frame*0.2)*0.4;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      g.fillStyle="#f5f5f5";
+      g.beginPath(); g.moveTo(0,-2); g.lineTo(-15.2,-3.2-flap*8); g.lineTo(-3.2,4); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0,-2); g.lineTo(15.2,-3.2-flap*8); g.lineTo(3.2,4); g.closePath(); g.fill();
+      g.fillStyle="#2b2b30"; g.fillRect(-16,-4.6-flap*8,4,3); g.fillRect(12,-4.6-flap*8,4,3);
+      g.fillStyle="#f5f5f5"; g.beginPath(); g.ellipse(0,1,4.6,8.6,0,0,TAU); g.fill();
+      g.beginPath(); g.arc(0,-8.5,4.5,0,TAU); g.fill();
+      g.fillStyle="#e23b3b"; g.beginPath(); g.moveTo(-2,-9); g.lineTo(0,-15); g.lineTo(2,-9); g.closePath(); g.fill();
+      g.strokeStyle="#e23b3b"; g.lineWidth=1.5;
+      g.beginPath(); g.moveTo(-2,9); g.lineTo(-3,14); g.moveTo(2,9); g.lineTo(3,14); g.stroke();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.2);
+      aura.addColorStop(0,"rgba(255,210,70,.32)"); aura.addColorStop(1,"rgba(255,210,70,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.2,0,TAU); g.fill();
+      g.save(); g.rotate(b.t*0.015); g.fillStyle=b.flash>0?"#fff3c0":"#ffcf2e";
+      for (let i=0;i<20;i++){ g.rotate(TAU/20); g.beginPath(); g.ellipse(b.r*0.95,0,b.r*0.5,b.r*0.18,0,0,TAU); g.fill(); }
+      g.restore();
+      g.fillStyle="#6b3a1a"; g.beginPath(); g.arc(0,0,b.r*0.65,0,TAU); g.fill();
+      g.fillStyle="rgba(40,20,8,.6)";
+      for (let i=0;i<6;i++){ const a=b.t*0.02+i; g.beginPath(); g.arc(Math.cos(a)*b.r*0.32,Math.sin(a*1.3)*b.r*0.32,2,0,TAU); g.fill(); }
+      g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      g.fillStyle="#ffcf2e"; g.fillRect(-2,-9,4,18);
+      g.fillStyle="#c79406"; g.fillRect(-2,-9,4,4);
+      g.restore();
+    },
+  },
+
+  // ---------- インド風 ----------
+  india: {
+    name: "インド風",
+    css: { bg:"#100617", bg2:"#2a1038", canvas:"#0c0414", panel:"#1a0e22", line:"#ff9933",
+           accent:"#ff9933", accent2:"#138808", gold:"#ffcf2e", text:"#fff0e0", dim:"#a88a9a" },
+    star: { near:"#ffd9a0", far:"#9a7ab0" },
+    spells: ["✦ घूर्णन चक्र ✦","✦ द्वि सर्पिल ✦","✦ चंद्र दरार ✦","✦ उल्का वर्षा ✦"],
+    ui: {
+      title:"मयूर — MAYURA", sub:"रंगों का नृत्य",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> — चलना<br>'
+          + '<span class="key">Z</span> तीर　<span class="key">Shift</span> धीमा<br>'
+          + '<span class="key">Space</span> बम　<span class="key">A</span> स्वतः<br>'
+          + 'तीन बार लगने पर समाप्त। स्पर्श से अंक बढ़ाएँ।',
+      start:"शुरू", retry:"फिर से", overTitle:"समाप्त",
+      overText:(s,c,g)=>`मंत्र: <span class="stat">${c}</span>　अंक: <span class="stat">${s.toLocaleString()}</span><br>स्पर्श: <span class="stat">${g}</span><br>एक बार फिर आकाश में।`,
+      scoreLabel:"अंक", grazeLabel:"स्पर्श", lifeLabel:"जीवन", bombLabel:"बम",
+      lifeIcon:"✦", bombIcon:"❁", autoWord:"स्वतः", autoBadge:"◆ स्वतः चालन ◆",
+      helpTitle:"नियंत्रण", helpNote:"स्वतः चालक अजेय नहीं है। उन्हीं नियमों से बचता है। देखकर आनंद लें।",
+      bannerColor:"#138808",
+    },
+    drawBackground(g, game) {
+      const bg=g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#2a1038"); bg.addColorStop(.5,"#180a26"); bg.addColorStop(1,"#100617");
+      g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+      const mx=W*0.74, my=H*0.16, mr=42;
+      const mg=g.createRadialGradient(mx,my,4,mx,my,mr*1.6);
+      mg.addColorStop(0,"rgba(255,235,200,.9)"); mg.addColorStop(.6,"rgba(255,210,150,.35)"); mg.addColorStop(1,"rgba(255,210,150,0)");
+      g.fillStyle=mg; g.beginPath(); g.arc(mx,my,mr*1.6,0,TAU); g.fill();
+      g.fillStyle="#ffe9c0"; g.beginPath(); g.arc(mx,my,mr,0,TAU); g.fill();
+      // 宮殿シルエット(下部、玉ねぎドーム＋小塔)
+      g.fillStyle="rgba(30,16,40,.92)";
+      const baseY=H-30; g.fillRect(0,baseY,W,30);
+      g.beginPath(); g.moveTo(W/2-30,baseY); g.quadraticCurveTo(W/2-34,baseY-34,W/2,baseY-50);
+      g.quadraticCurveTo(W/2+34,baseY-34,W/2+30,baseY); g.closePath(); g.fill();
+      for (const sx of [W*0.18, W*0.82]){ g.fillRect(sx-6,baseY-44,12,44); g.beginPath(); g.arc(sx,baseY-44,7,Math.PI,0); g.fill(); }
+    },
+    drawPlayer(g, p) {
+      const r=p.r, blink=p.inv>0 && (p.frame>>2)%2===0, fan=Math.sin(p.frame*0.1)*0.1+0.9;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      for (let i=-3;i<=3;i++){ const a=i*0.2*fan;
+        g.save(); g.rotate(a);
+        g.strokeStyle="#138808"; g.lineWidth=2; g.beginPath(); g.moveTo(0,r*0.2); g.lineTo(0,r*0.95); g.stroke();
+        g.fillStyle="#1f6fd0"; g.beginPath(); g.arc(0,r*0.95,4,0,TAU); g.fill();
+        g.fillStyle="#ffcf2e"; g.beginPath(); g.arc(0,r*0.95,1.8,0,TAU); g.fill();
+        g.restore(); }
+      g.fillStyle="#1f6fd0"; g.beginPath(); g.ellipse(0,-r*0.1,r*0.32,r*0.42,0,0,TAU); g.fill();
+      g.beginPath(); g.arc(0,-r*0.55,4.5,0,TAU); g.fill();
+      g.strokeStyle="#138808"; g.lineWidth=1.5; g.beginPath(); g.moveTo(0,-r*0.7); g.lineTo(0,-r*0.95); g.stroke();
+      g.fillStyle="#138808"; g.beginPath(); g.arc(0,-r*0.98,2,0,TAU); g.fill();
+      g.fillStyle="#ffcf2e"; g.beginPath(); g.moveTo(-2,-r*0.62); g.lineTo(0,-r*0.8); g.lineTo(2,-r*0.62); g.closePath(); g.fill();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.2);
+      aura.addColorStop(0,"rgba(255,153,51,.32)"); aura.addColorStop(1,"rgba(255,153,51,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.2,0,TAU); g.fill();
+      g.fillStyle=b.flash>0?"#fff3d0":"#ffcf2e"; g.beginPath(); g.arc(0,0,b.r,0,TAU); g.fill();
+      g.save(); g.rotate(b.t*0.02);
+      g.strokeStyle="#1f6fd0"; g.lineWidth=4; g.beginPath(); g.arc(0,0,b.r*0.8,0,TAU); g.stroke();
+      g.lineWidth=2; for (let i=0;i<24;i++){ g.save(); g.rotate(TAU/24*i); g.beginPath(); g.moveTo(0,0); g.lineTo(0,-b.r*0.8); g.stroke(); g.restore(); }
+      g.fillStyle="#1f6fd0"; g.beginPath(); g.arc(0,0,b.r*0.16,0,TAU); g.fill();
+      g.restore(); g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      g.strokeStyle="#caa24a"; g.lineWidth=2; g.beginPath(); g.moveTo(0,8); g.lineTo(0,-6); g.stroke();
+      g.fillStyle="#dfe7ee"; g.beginPath(); g.moveTo(0,-10); g.lineTo(-4,-4); g.lineTo(4,-4); g.closePath(); g.fill();
+      g.strokeStyle="#138808"; g.beginPath(); g.moveTo(0,8); g.lineTo(-3,11); g.moveTo(0,8); g.lineTo(3,11); g.stroke();
+      g.restore();
+    },
+  },
+
+  // ---------- インドネシア風 ----------
+  indonesia: {
+    name: "インドネシア風",
+    css: { bg:"#140608", bg2:"#3a0e12", canvas:"#100406", panel:"#1e0a0c", line:"#e23b3b",
+           accent:"#ffd24a", accent2:"#3dd6b0", gold:"#ffd24a", text:"#fff0e6", dim:"#b08a7a" },
+    star: { near:"#ffd9a0", far:"#b07a6a" },
+    spells: ["✦ Bintang Berputar ✦","✦ Pusaran Ganda ✦","✦ Celah Bulan ✦","✦ Hujan Meteor ✦"],
+    ui: {
+      title:"GARUDA NUSANTARA", sub:"SAYAP SANG RAJAWALI",
+      instr:'<span class="key">← ↑ ↓ →</span> / <span class="key">WASD</span> untuk terbang<br>'
+          + '<span class="key">Z</span> Tembak　<span class="key">Shift</span> Lambat<br>'
+          + '<span class="key">Space</span> Bom　<span class="key">A</span> Pilot otomatis<br>'
+          + 'Tiga kali kena, tamat. Serempet untuk skor.',
+      start:"MULAI", retry:"LAGI", overTitle:"TAMAT",
+      overText:(s,c,g)=>`Jurus: <span class="stat">${c}</span>　Skor: <span class="stat">${s.toLocaleString()}</span><br>Serempet: <span class="stat">${g}</span><br>Terbang sekali lagi.`,
+      scoreLabel:"Skor", grazeLabel:"Serempet", lifeLabel:"Nyawa", bombLabel:"Bom",
+      lifeIcon:"✦", bombIcon:"☀", autoWord:"PILOT OTOMATIS", autoBadge:"◆ PILOT OTOMATIS ◆",
+      helpTitle:"KONTROL", helpNote:"Pilot otomatis tidak kebal. Mengelak dengan aturan sama. Nikmati saja.",
+      bannerColor:"#3dd6b0",
+    },
+    drawBackground(g, game) {
+      const bg=g.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,"#3a0e12"); bg.addColorStop(.5,"#1e080c"); bg.addColorStop(1,"#140608");
+      g.fillStyle=bg; g.fillRect(-20,-20,W+40,H+40);
+      const mx=W*0.2, my=H*0.16, mr=34;
+      const mg=g.createRadialGradient(mx,my,4,mx,my,mr*1.6);
+      mg.addColorStop(0,"rgba(255,240,210,.85)"); mg.addColorStop(.6,"rgba(255,210,160,.3)"); mg.addColorStop(1,"rgba(255,210,160,0)");
+      g.fillStyle=mg; g.beginPath(); g.arc(mx,my,mr*1.6,0,TAU); g.fill();
+      g.fillStyle="#ffeccf"; g.beginPath(); g.arc(mx,my,mr,0,TAU); g.fill();
+      // 火山シルエット(下部)＋赤い噴煙
+      g.fillStyle="rgba(20,8,8,.92)"; const baseY=H-12;
+      g.beginPath(); g.moveTo(0,H); g.lineTo(0,baseY-20);
+      g.lineTo(W*0.32,baseY-60); g.lineTo(W*0.42,baseY-58); g.lineTo(W*0.7,baseY-20);
+      g.lineTo(W,baseY-30); g.lineTo(W,H); g.closePath(); g.fill();
+      g.fillStyle="rgba(255,90,40,.5)"; g.beginPath(); g.ellipse(W*0.37,baseY-60,8,5,0,0,TAU); g.fill();
+      g.fillStyle="rgba(255,150,60,.25)"; g.beginPath(); g.ellipse(W*0.37,baseY-82,14,18,0,0,TAU); g.fill();
+    },
+    drawPlayer(g, p) {
+      const blink=p.inv>0 && (p.frame>>2)%2===0, flap=Math.sin(p.frame*0.2)*0.4;
+      g.save(); g.translate(p.x,p.y); g.globalAlpha=blink?0.4:1;
+      g.fillStyle="#e8b53a";
+      g.beginPath(); g.moveTo(0,-2); g.lineTo(-16,-3.2-flap*9); g.lineTo(-3.5,4); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0,-2); g.lineTo(16,-3.2-flap*9); g.lineTo(3.5,4); g.closePath(); g.fill();
+      g.strokeStyle="#a8791f"; g.lineWidth=1;
+      g.beginPath(); g.moveTo(-3,0); g.lineTo(-13,-2.5-flap*7); g.moveTo(3,0); g.lineTo(13,-2.5-flap*7); g.stroke();
+      g.fillStyle="#e8b53a"; g.beginPath(); g.ellipse(0,1,4.6,8,0,0,TAU); g.fill();
+      g.fillStyle="#fff5e0"; g.beginPath(); g.arc(0,-8.5,5,0,TAU); g.fill();
+      g.fillStyle="#e8a23a"; g.beginPath(); g.moveTo(-2.5,-9); g.lineTo(0,-14.5); g.lineTo(2.5,-9); g.closePath(); g.fill();
+      g.globalAlpha=1; g.restore();
+      drawHitbox(g,p);
+    },
+    drawBoss(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      const pulse=1+Math.sin(b.t*0.08)*0.04; g.scale(pulse,pulse);
+      const aura=g.createRadialGradient(0,0,b.r*0.4,0,0,b.r*2.2);
+      aura.addColorStop(0,"rgba(226,59,59,.32)"); aura.addColorStop(1,"rgba(226,59,59,0)");
+      g.fillStyle=aura; g.beginPath(); g.arc(0,0,b.r*2.2,0,TAU); g.fill();
+      g.save(); g.rotate(b.t*0.02); g.fillStyle="#ffd24a";
+      for (let i=0;i<12;i++){ g.rotate(TAU/12); g.beginPath(); g.moveTo(b.r*0.9,0); g.lineTo(b.r+14,-6); g.lineTo(b.r+14,6); g.closePath(); g.fill(); }
+      g.restore();
+      g.fillStyle=b.flash>0?"#ffd0d0":"#e23b3b"; g.beginPath(); g.arc(0,0,b.r,0,TAU); g.fill();
+      g.fillStyle="#fff";
+      g.beginPath(); g.arc(-b.r*0.35,-b.r*0.15,b.r*0.22,0,TAU); g.fill();
+      g.beginPath(); g.arc(b.r*0.35,-b.r*0.15,b.r*0.22,0,TAU); g.fill();
+      g.fillStyle="#1a0a0a";
+      g.beginPath(); g.arc(-b.r*0.35,-b.r*0.15,b.r*0.1,0,TAU); g.fill();
+      g.beginPath(); g.arc(b.r*0.35,-b.r*0.15,b.r*0.1,0,TAU); g.fill();
+      g.fillStyle="#fff"; g.fillRect(-b.r*0.3,b.r*0.35,b.r*0.6,b.r*0.16);
+      g.beginPath(); g.moveTo(-b.r*0.2,b.r*0.51); g.lineTo(-b.r*0.1,b.r*0.66); g.lineTo(0,b.r*0.51); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(b.r*0.2,b.r*0.51); g.lineTo(b.r*0.1,b.r*0.66); g.lineTo(0,b.r*0.51); g.closePath(); g.fill();
+      g.restore();
+    },
+    drawPlayerBullet(g, b) {
+      g.save(); g.translate(b.x,b.y);
+      g.fillStyle="#dfe7ee"; g.beginPath();
+      g.moveTo(0,-10); g.quadraticCurveTo(-4,-4,0,0); g.quadraticCurveTo(4,4,0,10);
+      g.quadraticCurveTo(1.5,4,2,0); g.quadraticCurveTo(1.5,-4,0,-10); g.fill();
+      g.fillStyle="#8a5a1a"; g.fillRect(-2,8,4,4);
+      g.restore();
+    },
+  },
+};
+
+let themeKey = "wafu";
+let theme = THEMES[themeKey];
+
+// オーバーレイの文言をテーマとゲーム状態(タイトル/ゲームオーバー)に応じて更新
+function refreshOverlay() {
+  const u = theme.ui;
+  const over = (typeof game !== "undefined") && game.over;
+  document.getElementById("ovTitle").textContent = over ? u.overTitle : u.title;
+  document.getElementById("ovSub").textContent = u.sub;
+  document.getElementById("ovText").innerHTML = over
+    ? u.overText(game.score, game.boss.cycle, game.graze)
+    : u.instr;
+  document.getElementById("startBtn").textContent = over ? u.retry : u.start;
+}
+
+function applyTheme(key) {
+  themeKey = key; theme = THEMES[key];
+  const c = theme.css, r = document.documentElement.style;
+  r.setProperty("--bg", c.bg); r.setProperty("--bg2", c.bg2); r.setProperty("--canvasBg", c.canvas);
+  r.setProperty("--panel", c.panel); r.setProperty("--line", c.line);
+  r.setProperty("--accent", c.accent); r.setProperty("--accent2", c.accent2);
+  r.setProperty("--gold", c.gold); r.setProperty("--text", c.text); r.setProperty("--dim", c.dim);
+  // HUDラベル
+  const u = theme.ui;
+  document.getElementById("lblScore").textContent = u.scoreLabel;
+  document.getElementById("lblGraze").textContent = u.grazeLabel;
+  document.getElementById("lblLife").textContent = u.lifeLabel;
+  document.getElementById("lblBomb").textContent = u.bombLabel;
+  document.getElementById("helpTitle").textContent = u.helpTitle;
+  document.getElementById("helpNote").textContent = u.helpNote;
+  document.getElementById("autoBadge").textContent = u.autoBadge;
+  // セレクタのハイライト
+  [...document.getElementById("selector").children].forEach(b => b.classList.toggle("active", b.dataset.key === key));
+  if (typeof game !== "undefined") {
+    game.refreshAutoBtn();
+    if (game.boss) game.updateHud();  // ボスはゲーム開始時に生成される。タイトル中はnull
+  }
+  refreshOverlay();
+}
+
+// テイスト選択ボタンを生成 (スタート前のオーバーレイにのみ表示)
+(function buildSelector() {
+  const sel = document.getElementById("selector");
+  for (const key of Object.keys(THEMES)) {
+    const btn = document.createElement("button");
+    btn.className = "themeBtn";
+    btn.dataset.key = key;
+    btn.textContent = THEMES[key].name;
+    btn.addEventListener("click", () => applyTheme(key));
+    sel.appendChild(btn);
+  }
+})();
+
+// ------------------------------------------------------------
+//  効果音 (WebAudio。外部ファイル不使用)
+//  起動はユーザー操作後でないとブラウザに拒否されるため start() で初期化する。
+// ------------------------------------------------------------
+const Sound = {
+  ctx: null,
+  master: null,
+  init() {
+    if (this.ctx) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.35;
+      this.master.connect(this.ctx.destination);
+    } catch { this.ctx = null; }
+  },
+  beep(freq, dur, type, vol, slideTo) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type || "square";
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime((vol || 0.3), t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur);
+  },
+  shot()  { this.beep(880, 0.05, "square", 0.05, 1200); },
+  graze() { this.beep(1500, 0.06, "sine", 0.12, 2200); },
+  hit()   { this.beep(180, 0.4, "sawtooth", 0.5, 60); },
+  bomb()  { this.beep(120, 0.7, "sawtooth", 0.6, 40); this.beep(700, 0.7, "sine", 0.3, 200); },
+  spell() { this.beep(440, 0.5, "triangle", 0.35, 880); },
+};
+
+// ------------------------------------------------------------
+//  弾スプライトのキャッシュ
+//  数百発を毎フレーム createRadialGradient で描くと重いので、
+//  色と半径ごとに一度だけオフスクリーンへ描いて drawImage で使い回す。
+// ------------------------------------------------------------
+const spriteCache = new Map();
+function bulletSprite(color, r) {
+  const key = color + "_" + r;
+  let s = spriteCache.get(key);
+  if (s) return s;
+  const pad = 3, size = (r + pad) * 2;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const cx = size / 2;
+  const grad = g.createRadialGradient(cx, cx, 0.5, cx, cx, r + pad);
+  grad.addColorStop(0, "#ffffff");
+  grad.addColorStop(0.35, "#ffffff");
+  grad.addColorStop(0.55, color);
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(cx, cx, r + pad, 0, TAU); g.fill();
+  s = { canvas: c, off: cx };
+  spriteCache.set(key, s);
+  return s;
+}
+
+// ============================================================
+//  Particle — 被弾・爆発・かすり火花・消滅星屑
+// ============================================================
+class Particle {
+  constructor(x, y, vx, vy, life, color, size, kind) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.life = life; this.max = life;
+    this.color = color; this.size = size || 3;
+    this.kind = kind || "dot"; // dot | spark | ring
+    this.r0 = size || 3;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    this.vx *= 0.94; this.vy *= 0.94;
+    this.life--;
+    return this.life > 0;
+  }
+  draw(g) {
+    const a = this.life / this.max;
+    g.globalAlpha = a;
+    if (this.kind === "ring") {
+      g.strokeStyle = this.color; g.lineWidth = 2;
+      g.beginPath(); g.arc(this.x, this.y, this.r0 * (1 - a) * 4 + 2, 0, TAU); g.stroke();
+    } else if (this.kind === "spark") {
+      g.strokeStyle = this.color; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(this.x, this.y);
+      g.lineTo(this.x - this.vx * 2, this.y - this.vy * 2); g.stroke();
+    } else {
+      g.fillStyle = this.color;
+      g.beginPath(); g.arc(this.x, this.y, this.size * a, 0, TAU); g.fill();
+    }
+    g.globalAlpha = 1;
+  }
+}
+
+// ============================================================
+//  Bullet — 敵弾。直進に加え 旋回(curve)・加減速(accel)・波(wave) を持つ。
+// ============================================================
+class Bullet {
+  constructor(x, y, vx, vy, r, color, opt) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.r = r; this.color = color;
+    opt = opt || {};
+    this.curve = opt.curve || 0;     // 毎フレーム速度ベクトルを回す角度。曲がる弾
+    this.accel = opt.accel || 0;     // 速度倍率の増減。加速/減速弾
+    this.minSpd = opt.minSpd || 0.4;
+    this.maxSpd = opt.maxSpd || 9;
+    this.wave = opt.wave || 0;       // 横揺れ振幅。波打つ弾
+    this.waveFreq = opt.waveFreq || 0.1;
+    this.t = 0;
+    this.grazed = false;
+    this.sprite = bulletSprite(color, r);
+  }
+  update() {
+    this.t++;
+    if (this.curve) {
+      const cs = Math.cos(this.curve), sn = Math.sin(this.curve);
+      const nvx = this.vx * cs - this.vy * sn;
+      const nvy = this.vx * sn + this.vy * cs;
+      this.vx = nvx; this.vy = nvy;
+    }
+    if (this.accel) {
+      const sp = Math.hypot(this.vx, this.vy);
+      const ns = clamp(sp + this.accel, this.minSpd, this.maxSpd);
+      if (sp > 0.0001) { this.vx = this.vx / sp * ns; this.vy = this.vy / sp * ns; }
+    }
+    let dx = this.vx, dy = this.vy;
+    if (this.wave) {
+      // 進行方向に対して直交方向へ揺らす
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      const px = -this.vy / sp, py = this.vx / sp;
+      const w = Math.cos(this.t * this.waveFreq) * this.wave;
+      dx += px * w; dy += py * w;
+    }
+    this.x += dx; this.y += dy;
+  }
+  draw(g) {
+    g.drawImage(this.sprite.canvas, this.x - this.sprite.off, this.y - this.sprite.off);
+  }
+  offscreen() {
+    return this.x < -24 || this.x > W + 24 || this.y < -24 || this.y > H + 40;
+  }
+}
+
+// ============================================================
+//  PlayerBullet — 自機ショット。上方向へ直進。
+// ============================================================
+class PlayerBullet {
+  constructor(x, y, vx, vy, dmg) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.dmg = dmg;
+    this.r = 4;
+  }
+  update() { this.x += this.vx; this.y += this.vy; }
+  draw(g) { theme.drawPlayerBullet(g, this); }
+  offscreen() { return this.y < -16; }
+}
+
+// ============================================================
+//  Player — 画面下部の自機。見た目より小さい当たり判定を持つ。
+// ============================================================
+class Player {
+  constructor() {
+    this.x = W / 2; this.y = H - 90;
+    this.r = 16;        // 見た目の大きさ
+    this.hitR = 3.2;    // 実際の当たり判定。東方同様に極小
+    this.grazeR = 18;   // かすり判定半径
+    this.speed = 4.6;
+    this.slowSpeed = 2.0;
+    this.cooldown = 0;
+    this.inv = 0;       // 無敵フレーム
+    this.frame = 0;
+    this.slow = false;
+  }
+  // dx,dy: -1..1 の移動入力, slow: 低速か
+  update(dx, dy, slow) {
+    this.frame++;
+    this.slow = slow;
+    const sp = slow ? this.slowSpeed : this.speed;
+    const len = Math.hypot(dx, dy) || 1;
+    this.x = clamp(this.x + dx / len * sp * (Math.hypot(dx, dy) > 0 ? 1 : 0), 14, W - 14);
+    this.y = clamp(this.y + dy / len * sp * (Math.hypot(dx, dy) > 0 ? 1 : 0), 40, H - 24);
+    if (this.cooldown > 0) this.cooldown--;
+    if (this.inv > 0) this.inv--;
+  }
+  draw(g) { theme.drawPlayer(g, this); }
+}
+
+// ============================================================
+//  Boss — 画面上部の大型敵。スペルカードを循環して4種の弾幕を放つ。
+// ============================================================
+// スペル名はテイストごとに theme.spells から引く。ここでは体力とパターンのみ共通定義
+const SPELLS = [
+  { hp: 2600, pattern: "ring" },
+  { hp: 2300, pattern: "spiral" },
+  { hp: 2600, pattern: "gap" },
+  { hp: 3200, pattern: "rain" },
+];
+
+class Boss {
+  constructor(game) {
+    this.game = game;
+    this.x = W / 2; this.y = 120;
+    this.r = 34;
+    this.t = 0;
+    this.spellIdx = 0;
+    this.hp = SPELLS[0].hp;
+    this.maxHp = SPELLS[0].hp;
+    this.emitTimer = 0;
+    this.spiralAng = 0;
+    this.gapAng = 0;
+    this.cycle = 0;       // 倒したスペル数
+    this.invuln = 90;     // スペル開始直後の演出用無敵
+    this.flash = 0;
+  }
+  get pattern() { return SPELLS[this.spellIdx % SPELLS.length].pattern; }
+  get name() { return theme.spells[this.spellIdx % theme.spells.length]; }
+
+  damage(d) {
+    if (this.invuln > 0) return;
+    this.hp -= d;
+    this.flash = 3;
+    if (this.hp <= 0) this.nextSpell();
+  }
+  nextSpell() {
+    // スペル撃破。画面の弾を功徳に変えてボーナス、次のスペルへ
+    this.game.clearBulletsToScore(3000);
+    this.game.spellBonus();
+    this.cycle++;
+    this.spellIdx++;
+    const s = SPELLS[this.spellIdx % SPELLS.length];
+    // 一周ごとに体力を増やして長く楽しめるようにする
+    const scale = 1 + Math.floor(this.spellIdx / SPELLS.length) * 0.35;
+    this.hp = this.maxHp = Math.floor(s.hp * scale);
+    this.invuln = 100;
+    this.emitTimer = 0;
+    Sound.spell();
+  }
+  update() {
+    this.t++;
+    if (this.invuln > 0) this.invuln--;
+    if (this.flash > 0) this.flash--;
+    // ゆったり左右＋上下に遊弋
+    this.x = W / 2 + Math.sin(this.t * 0.012) * (W * 0.30);
+    this.y = 118 + Math.sin(this.t * 0.02) * 26;
+    if (this.invuln > 60) return; // 演出中は撃たない
+    this.emitTimer--;
+    if (this.emitTimer <= 0) this.emit();
+  }
+  emit() {
+    const g = this.game;
+    const lv = this.cycle; // 周回が進むほど密度・速度が上がる
+    const p = this.pattern;
+    if (p === "ring") {
+      // 回転円形弾幕: 多重リングを回転させながら放射
+      const n = 22 + lv * 2;
+      const base = this.t * 0.04;
+      const cols = [PAL.red, PAL.gold, PAL.purple];
+      for (let ring = 0; ring < 2; ring++) {
+        const spd = 1.8 + ring * 0.7 + lv * 0.15;
+        const off = ring * (Math.PI / n);
+        const col = cols[(ring + (this.t >> 5)) % cols.length];
+        for (let i = 0; i < n; i++) {
+          const a = TAU / n * i + base * (ring % 2 ? -1 : 1) + off;
+          g.spawn(this.x, this.y, Math.cos(a) * spd, Math.sin(a) * spd, 6, col);
+        }
+      }
+      this.emitTimer = 26;
+    } else if (p === "spiral") {
+      // 螺旋弾幕: 時計回りと反時計回りの腕を同時に伸ばす
+      this.spiralAng += 0.30;
+      const arms = 3 + Math.floor(lv / 2);
+      const spd = 2.3 + lv * 0.12;
+      for (let i = 0; i < arms; i++) {
+        const a1 = this.spiralAng + TAU / arms * i;
+        const a2 = -this.spiralAng + TAU / arms * i + 0.4;
+        g.spawn(this.x, this.y, Math.cos(a1) * spd, Math.sin(a1) * spd, 5, PAL.cyan);
+        g.spawn(this.x, this.y, Math.cos(a2) * spd, Math.sin(a2) * spd, 5, PAL.green);
+      }
+      this.emitTimer = 6;
+    } else if (p === "gap") {
+      // 隙間弾幕: 大量の全方位弾に一定角度の空白を作り続ける
+      // 回転を遅くすると安全回廊が安定し、抜ける様子を眺めやすい
+      this.gapAng += 0.02;
+      const n = 36 + lv * 4;
+      const gapCenter = this.gapAng % TAU;
+      const gapHalf = 0.55;            // 空白の半幅
+      const spd = 2.2 + lv * 0.12;
+      for (let i = 0; i < n; i++) {
+        const a = TAU / n * i;
+        let d = Math.abs(((a - gapCenter + Math.PI) % TAU) - Math.PI);
+        if (d < gapHalf) continue;     // 隙間は撃たない
+        g.spawn(this.x, this.y, Math.cos(a) * spd, Math.sin(a) * spd, 5.5, PAL.purple);
+      }
+      // 自機狙いの一矢で隙間へ誘導する緊張感を出す
+      if (this.t % 110 === 0) {
+        const aim = Math.atan2(g.player.y - this.y, g.player.x - this.x);
+        for (let k = -1; k <= 1; k++)
+          g.spawn(this.x, this.y, Math.cos(aim + k * 0.12) * 4.0, Math.sin(aim + k * 0.12) * 4.0, 6, PAL.gold);
+      }
+      this.emitTimer = 22;
+    } else {
+      // 降下型弾幕: 上端から下へ流す。波・加速・減速・曲がる弾と一時的な安全地帯
+      const cols = [PAL.blue, PAL.cyan, PAL.green];
+      const cnt = 5 + lv;
+      // 安全地帯を作るため、ある一区画は撃たない
+      const safeX = W * 0.5 + Math.sin(this.t * 0.03) * W * 0.32;
+      for (let i = 0; i < cnt; i++) {
+        const x = rand(20, W - 20);
+        if (Math.abs(x - safeX) < 46) continue;
+        const kind = Math.floor(rand(0, 4));
+        const col = cols[i % cols.length];
+        if (kind === 0)      g.spawn(x, -10, 0, rand(2.2, 3.0), 6, col, { accel: 0.05, maxSpd: 6 });   // 加速
+        else if (kind === 1) g.spawn(x, -10, 0, rand(3.8, 4.6), 6, col, { accel: -0.04, minSpd: 1.2 }); // 減速
+        else if (kind === 2) g.spawn(x, -10, rand(-0.6, 0.6), 2.6, 5.5, col, { wave: 1.4, waveFreq: 0.12 }); // 波
+        else                 g.spawn(x, -10, rand(-1.2, 1.2), 2.8, 5.5, col, { curve: rand(-0.02, 0.02) }); // 曲がる
+      }
+      // ときどき左右から差し込む横弾で立体感を出す
+      if (this.t % 40 === 0) {
+        const fromLeft = Math.random() < 0.5;
+        const sx = fromLeft ? -10 : W + 10;
+        const vx = fromLeft ? rand(2.2, 3.0) : -rand(2.2, 3.0);
+        g.spawn(sx, rand(60, H * 0.5), vx, rand(0.6, 1.4), 6, PAL.red, { curve: rand(-0.01, 0.01) });
+      }
+      this.emitTimer = 14;
+    }
+  }
+  draw(g) { theme.drawBoss(g, this); }
+}
+
+// ============================================================
+//  AutoPilot — 自機と同じルールで弾を避けるAI。
+//  危険度マップで安全方向を選び、人間らしい揺れ・かすり狙いを加える。
+//  禁止事項: 完全無敵・テレポート・超反応・フレーム単位の未来予知。
+// ============================================================
+class AutoPilot {
+  constructor(game) {
+    this.game = game;
+    this.tx = W / 2; this.ty = H - 90;  // 目標座標
+    this.decideTimer = 0;               // 反応に間を作るための再判断クールダウン
+    this.wobble = 0;
+    this.dirCount = 16;
+  }
+  // 1フレーム分の入力(dx,dy,slow,bomb)を返す
+  decide(player, bullets, boss) {
+    const perceive = 200;      // 視界。全画面を一度に把握しない
+    const T = 22, steps = 7;   // 未来予測は短く。超反応にしない
+    // 近接弾だけ抽出
+    const near = [];
+    let nearest = null, nearestD = Infinity;
+    for (const b of bullets) {
+      const d = Math.hypot(b.x - player.x, b.y - player.y);
+      if (d < perceive) {
+        near.push(b);
+        if (d < nearestD) { nearestD = d; nearest = b; }
+      }
+    }
+
+    // 危険度の最も低い移動先候補を探す
+    const preferX = boss ? clamp(boss.x, 40, W - 40) : W / 2;
+    const preferY = H * 0.78;
+    // 候補は二重リング。粗い回避と細かい微調整の両方を持たせる
+    const candidates = [{ x: player.x, y: player.y }];
+    for (const step of [16, 30, 46]) {
+      for (let i = 0; i < this.dirCount; i++) {
+        const a = TAU / this.dirCount * i;
+        candidates.push({ x: player.x + Math.cos(a) * step, y: player.y + Math.sin(a) * step });
+      }
+    }
+
+    let best = candidates[0], bestCost = Infinity;
+    for (const c of candidates) {
+      if (c.x < 16 || c.x > W - 16 || c.y < 44 || c.y > H - 20) continue;
+      let cost = 0;
+      for (const b of near) {
+        // 弾の未来軌道との最近接距離を求める
+        let md = Infinity;
+        for (let s = 0; s <= steps; s++) {
+          const tt = T * s / steps;
+          const bx = b.x + b.vx * tt, by = b.y + b.vy * tt;
+          const d = Math.hypot(bx - c.x, by - c.y);
+          if (d < md) md = d;
+        }
+        const danger = 52;
+        if (md < danger) {
+          // 近いほど指数的に重く。速い弾も重く見る
+          const t = (danger - md) / danger;
+          const sp = Math.hypot(b.vx, b.vy);
+          cost += t * t * 130 * (1 + sp * 0.1);
+        }
+      }
+      // 壁際は避ける
+      cost += Math.max(0, 70 - (c.x - 16)) * 1.4;
+      cost += Math.max(0, 70 - (W - 16 - c.x)) * 1.4;
+      cost += Math.max(0, 60 - (H - 20 - c.y)) * 1.2;
+      // ショットを当てるためボス直下へ寄る。危険回避より弱いが無視はしない
+      cost += Math.abs(c.x - preferX) * 0.35;
+      cost += Math.abs(c.y - preferY) * 0.06;
+      if (cost < bestCost) { bestCost = cost; best = c; }
+    }
+
+    // 反応に間を入れる。安全なときだけ目標を緩く更新し、人間らしい遅れを作る
+    this.decideTimer--;
+    const inDanger = bestCost > 140;
+    if (inDanger || this.decideTimer <= 0) {
+      this.tx = best.x; this.ty = best.y;
+      this.decideTimer = inDanger ? 1 : Math.floor(rand(3, 7));
+    }
+
+    // かすり狙い: 十分安全なときだけ近い弾へ少し寄せて功徳を稼ぐ
+    if (!inDanger && nearest && nearestD > player.grazeR + 8 && nearestD < 70) {
+      this.tx += (nearest.x - player.x) * 0.12;
+      this.ty += (nearest.y - player.y) * 0.12;
+    }
+
+    // 微小な揺れで機械的でない動きにする。回避中は揺らさない
+    this.wobble += 0.18;
+    if (!inDanger) this.tx += Math.sin(this.wobble) * 1.0;
+
+    // 目標へ向かう入力
+    let dx = this.tx - player.x, dy = this.ty - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1.0) { dx = 0; dy = 0; }
+    // 本当に際どい時だけ低速で精密に避ける(東方の低速移動を模す)
+    const slow = inDanger && nearestD < 26;
+
+    // 被弾寸前で逃げ場がない時だけボムを切る
+    let bomb = false;
+    if (bestCost > 1500 && player.inv <= 0 && nearestD < 18) bomb = true;
+
+    return { dx, dy, slow, bomb };
+  }
+}
+
+// ============================================================
+//  Game — 全体の進行・入力・衝突・描画・UI を統括
+// ============================================================
+class Game {
+  constructor() {
+    this.player = null;
+    this.boss = null;
+    this.bullets = [];        // 敵弾
+    this.pbullets = [];       // 自機弾
+    this.particles = [];
+    this.stars = [];
+    this.auto = new AutoPilot(this);
+    this.autoOn = true;
+    this.running = false;
+    this.over = false;
+    this.score = 0;
+    this.graze = 0;
+    this.lives = 3;
+    this.bombs = 3;
+    this.shake = 0;
+    this.flash = 0;
+    this.frame = 0;
+    this.banner = null;       // スペル名の表示演出
+    this.bannerTimer = 0;
+    this.lastGrazeSound = 0;
+    this.keys = {};
+    this.prevSpace = false;
+    this.initStars();
+    this.bindInput();
+    this.cacheDom();
+  }
+  cacheDom() {
+    this.dom = {
+      overlay: document.getElementById("overlay"),
+      startBtn: document.getElementById("startBtn"),
+      autoBtn: document.getElementById("autoBtn"),
+      autoBadge: document.getElementById("autoBadge"),
+      hScore: document.getElementById("hScore"),
+      hGraze: document.getElementById("hGraze"),
+      hLife: document.getElementById("hLife"),
+      hBomb: document.getElementById("hBomb"),
+      bossbar: document.getElementById("bossbar"),
+      bossName: document.getElementById("bossName"),
+      bossFill: document.getElementById("bossFill"),
+      bossStars: document.getElementById("bossStars"),
+      ovTitle: document.querySelector("#overlay h1"),
+      ovText: document.querySelector("#overlay p"),
+    };
+  }
+  initStars() {
+    this.stars = [];
+    for (let i = 0; i < 120; i++) {
+      this.stars.push({
+        x: Math.random() * W, y: Math.random() * H,
+        z: Math.random(), // 奥行き。手前ほど速く大きく明るい
+      });
+    }
+  }
+  bindInput() {
+    addEventListener("keydown", e => {
+      const k = e.key.toLowerCase();
+      if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()) || e.key === " ") e.preventDefault();
+      this.keys[k] = true;
+      if (k === "a" && !e.repeat) this.toggleAuto();
+    });
+    addEventListener("keyup", e => { this.keys[e.key.toLowerCase()] = false; });
+    this.dom = this.dom || {};
+  }
+  toggleAuto() {
+    this.autoOn = !this.autoOn;
+    this.refreshAutoBtn();
+    document.getElementById("autoBadge").classList.toggle("hidden", !this.autoOn || !this.running);
+  }
+  refreshAutoBtn() {
+    const b = document.getElementById("autoBtn");
+    b.textContent = `${theme.ui.autoWord}: ${this.autoOn ? "ON" : "OFF"}　[ A ]`;
+    b.classList.toggle("on", this.autoOn);
+  }
+  // ---- 弾生成のショートカット ----
+  spawn(x, y, vx, vy, r, color, opt) {
+    // 過密による失速を防ぐ安全弁。古い弾を捨てる
+    if (this.bullets.length > 2200) this.bullets.shift();
+    this.bullets.push(new Bullet(x, y, vx, vy, r, color, opt));
+  }
+  burst(x, y, color, n, spd, kind) {
+    for (let i = 0; i < n; i++) {
+      const a = TAU * i / n + Math.random() * 0.4;
+      const s = rand(spd * 0.4, spd);
+      this.particles.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(18, 36), color, rand(2, 4), kind || "dot"));
+    }
+  }
+  reset() {
+    this.player = new Player();
+    this.boss = new Boss(this);
+    this.bullets = []; this.pbullets = []; this.particles = [];
+    this.score = 0; this.graze = 0; this.lives = 3; this.bombs = 3;
+    this.shake = 0; this.flash = 0; this.frame = 0; this.over = false;
+    this.showBanner(this.boss.name);
+  }
+  start() {
+    Sound.init();
+    this.reset();
+    this.running = true;
+    this.dom.overlay.classList.add("hidden");
+    this.dom.bossbar.classList.remove("hidden");
+    this.dom.autoBadge.classList.toggle("hidden", !this.autoOn);
+  }
+  gameOver() {
+    this.over = true; this.running = false;
+    this.dom.overlay.classList.remove("hidden");
+    this.dom.bossbar.classList.add("hidden");
+    this.dom.autoBadge.classList.add("hidden");
+    refreshOverlay();
+  }
+  showBanner(text) { this.banner = text; this.bannerTimer = 150; }
+  spellBonus() {
+    this.score += 30000 + this.boss.cycle * 5000;
+    this.flash = 14;
+    this.shake = 10;
+    this.burst(this.boss.x, this.boss.y, PAL.gold, 50, 7, "spark");
+    this.showBanner(theme.spells[(this.boss.spellIdx + 1) % theme.spells.length]);
+  }
+  // ボムやスペル撃破で画面の弾を功徳に変える
+  clearBulletsToScore(per) {
+    for (const b of this.bullets) {
+      this.score += 50;
+      if (Math.random() < 0.25) this.particles.push(new Particle(b.x, b.y, 0, -rand(0.5, 1.5), 24, PAL.gold, 2, "dot"));
+    }
+    this.bullets.length = 0;
+    this.score += 0; // per は将来の調整余地。現状はかすり功徳に集約
+  }
+  useBomb() {
+    if (this.bombs <= 0 || !this.running) return;
+    this.bombs--;
+    Sound.bomb();
+    this.flash = 16; this.shake = 14;
+    this.player.inv = Math.max(this.player.inv, 120);
+    this.clearBulletsToScore();
+    this.boss.damage(1200);
+    this.burst(this.player.x, this.player.y, PAL.cyan, 60, 9, "spark");
+  }
+  onHit() {
+    if (this.player.inv > 0) return;
+    this.lives--;
+    Sound.hit();
+    this.flash = 18; this.shake = 16;
+    this.burst(this.player.x, this.player.y, PAL.red, 40, 8, "spark");
+    this.burst(this.player.x, this.player.y, "#fff", 20, 5, "dot");
+    // 被弾時は周囲の弾を消して立て直しの猶予を作る(東方の被弾仕様に倣う)
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      if (Math.hypot(this.bullets[i].x - this.player.x, this.bullets[i].y - this.player.y) < 110)
+        this.bullets.splice(i, 1);
+    }
+    this.player.inv = 130;
+    this.player.x = W / 2; this.player.y = H - 90;
+    if (this.lives < 0) this.gameOver();
+  }
+  // ---- 毎フレームの更新 ----
+  step() {
+    this.frame++;
+    if (this.shake > 0) this.shake *= 0.85;
+    if (this.flash > 0) this.flash--;
+    if (this.bannerTimer > 0) this.bannerTimer--;
+
+    // 入力(手動 or オート)
+    let input;
+    if (this.autoOn) {
+      input = this.auto.decide(this.player, this.bullets, this.boss);
+      if (input.bomb) this.useBomb();
+    } else {
+      let dx = 0, dy = 0;
+      if (this.keys["arrowleft"] || this.keys["a"]) dx -= 1;
+      if (this.keys["arrowright"] || this.keys["d"]) dx += 1;
+      if (this.keys["arrowup"] || this.keys["w"]) dy -= 1;
+      if (this.keys["arrowdown"] || this.keys["s"]) dy += 1;
+      const slow = this.keys["shift"];
+      input = { dx, dy, slow };
+      // ボム(Space)は押した瞬間だけ
+      const sp = !!this.keys[" "];
+      if (sp && !this.prevSpace) this.useBomb();
+      this.prevSpace = sp;
+    }
+    this.player.update(input.dx, input.dy, input.slow);
+
+    // ショット(オートも自動射撃。常時連射)
+    const shooting = this.autoOn || this.keys["z"] || this.keys["x"];
+    if (shooting && this.player.cooldown <= 0) {
+      const px = this.player.x, py = this.player.y - 14;
+      this.pbullets.push(new PlayerBullet(px - 7, py, 0, -13, 6));
+      this.pbullets.push(new PlayerBullet(px + 7, py, 0, -13, 6));
+      if (this.player.slow) {
+        // 低速時は前方集中。やや火力アップ
+        this.pbullets.push(new PlayerBullet(px, py - 4, 0, -14, 6));
+      } else {
+        // 通常時は軽く広げる
+        this.pbullets.push(new PlayerBullet(px - 12, py + 4, -1.4, -12.5, 5));
+        this.pbullets.push(new PlayerBullet(px + 12, py + 4, 1.4, -12.5, 5));
+      }
+      this.player.cooldown = 4;
+      if (this.frame % 3 === 0) Sound.shot();
+    }
+
+    // ボス更新
+    this.boss.update();
+
+    // 自機弾更新＋ボス衝突
+    for (let i = this.pbullets.length - 1; i >= 0; i--) {
+      const b = this.pbullets[i];
+      b.update();
+      if (b.offscreen()) { this.pbullets.splice(i, 1); continue; }
+      if (Math.hypot(b.x - this.boss.x, b.y - this.boss.y) < this.boss.r) {
+        this.boss.damage(b.dmg);
+        this.score += 10;
+        if (Math.random() < 0.5)
+          this.particles.push(new Particle(b.x, b.y, rand(-1, 1), rand(-2, 0), 12, "#ffe9a0", 2, "dot"));
+        this.pbullets.splice(i, 1);
+      }
+    }
+
+    // 敵弾更新＋かすり＋被弾判定
+    const p = this.player;
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.update();
+      if (b.offscreen()) { this.bullets.splice(i, 1); continue; }
+      const d = Math.hypot(b.x - p.x, b.y - p.y);
+      // 被弾
+      if (d < b.r + p.hitR) {
+        this.bullets.splice(i, 1);
+        this.onHit();
+        continue;
+      }
+      // かすり
+      if (!b.grazed && d < b.r + p.grazeR) {
+        b.grazed = true;
+        this.graze++;
+        this.score += 80;
+        this.particles.push(new Particle(p.x, p.y, 0, 0, 14, PAL.cyan, 3, "ring"));
+        if (this.frame - this.lastGrazeSound > 4) { Sound.graze(); this.lastGrazeSound = this.frame; }
+      }
+    }
+
+    // パーティクル
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      if (!this.particles[i].update()) this.particles.splice(i, 1);
+    }
+
+    // 星の下方向スクロール
+    for (const s of this.stars) {
+      s.y += 0.4 + s.z * 1.8;
+      if (s.y > H) { s.y = -2; s.x = Math.random() * W; s.z = Math.random(); }
+    }
+
+    this.updateHud();
+  }
+  updateHud() {
+    this.dom.hScore.textContent = this.score.toLocaleString();
+    this.dom.hGraze.textContent = this.graze;
+    this.dom.hLife.innerHTML = theme.ui.lifeIcon.repeat(Math.max(0, this.lives)) || "—";
+    this.dom.hBomb.innerHTML = theme.ui.bombIcon.repeat(Math.max(0, this.bombs)) || "—";
+    const ratio = clamp(this.boss.hp / this.boss.maxHp, 0, 1);
+    this.dom.bossFill.style.width = (ratio * 100) + "%";
+    this.dom.bossName.textContent = this.boss.name;
+    this.dom.bossStars.textContent = "撃破 " + "✦".repeat(Math.min(this.boss.cycle, 12)) + (this.boss.cycle > 12 ? `+${this.boss.cycle - 12}` : "");
+  }
+  // ---- 描画 ----
+  render() {
+    // 見た目アニメ用の時計。step が回らないタイトル/ゲームオーバー中も進める
+    this.clock = (this.clock || 0) + 1;
+    ctx.save();
+    if (this.shake > 0.5) ctx.translate(rand(-this.shake, this.shake), rand(-this.shake, this.shake));
+
+    // 背景: テイストごとの描画に委譲
+    theme.drawBackground(ctx, this);
+
+    // タイトル/ゲームオーバー中は step が回らないので、星はここで流す
+    if (!this.running) {
+      for (const s of this.stars) { s.y += 0.4 + s.z * 1.8; if (s.y > H) { s.y = -2; s.x = Math.random() * W; s.z = Math.random(); } }
+    }
+
+    // 流れる星 (縦スクロール感は全テイスト共通。色だけテーマから取る)
+    const sc = theme.star;
+    for (const s of this.stars) {
+      ctx.globalAlpha = 0.3 + s.z * 0.7;
+      ctx.fillStyle = s.z > 0.7 ? sc.near : sc.far;
+      const sz = 0.5 + s.z * 1.8;
+      ctx.fillRect(s.x, s.y, sz, sz + s.z * 3);
+    }
+    ctx.globalAlpha = 1;
+
+    if (this.running || this.over) {
+      this.boss.draw(ctx);
+      // 自機弾(加算で淡く光らせる)
+      ctx.globalCompositeOperation = "lighter";
+      for (const b of this.pbullets) b.draw(ctx);
+      ctx.globalCompositeOperation = "source-over";
+      // 敵弾
+      for (const b of this.bullets) b.draw(ctx);
+      // パーティクル
+      for (const pt of this.particles) pt.draw(ctx);
+      // 自機
+      if (!this.over) this.player.draw(ctx);
+    } else {
+      // タイトル中: 選択テイストの自機とボスを、背景の月や太陽くらいの大きさで見せる。
+      // 実体は未生成なので描画専用ダミーを原点に置き、ctx 側で拡大する。
+      ctx.save();
+      ctx.translate(W/2 + Math.sin(this.clock*0.012)*W*0.16, 150);
+      ctx.scale(1.8, 1.8);
+      theme.drawBoss(ctx, { x: 0, y: 0, r: 34, t: this.clock, flash: 0 });
+      ctx.restore();
+      ctx.save();
+      ctx.translate(W/2, H-66);  // 画面最下部へ。中央のボタン群と重ならない位置
+      ctx.scale(2.7, 2.7);
+      theme.drawPlayer(ctx, { x: 0, y: 0, r: 16, frame: this.clock, slow: false, inv: 0, hitR: 3.2, grazeR: 18 });
+      ctx.restore();
+    }
+
+    // スペル名バナー
+    if (this.bannerTimer > 0 && this.banner) {
+      const a = this.bannerTimer > 120 ? (150 - this.bannerTimer) / 30 : Math.min(1, this.bannerTimer / 40);
+      ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 20px 'Hiragino Sans','Yu Gothic',serif";
+      ctx.textAlign = "center";
+      ctx.shadowColor = theme.ui.bannerColor; ctx.shadowBlur = 16;
+      ctx.fillText(this.banner, W / 2, H * 0.42);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.textAlign = "left";
+    }
+
+    ctx.restore();
+
+    // 被弾・ボムの全画面フラッシュ
+    if (this.flash > 0) {
+      ctx.globalAlpha = this.flash / 24;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+  }
+  loop() {
+    if (this.running) this.step();
+    this.render();
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+// ============================================================
+//  起動
+// ============================================================
+const game = new Game();
+game.dom.startBtn.addEventListener("click", () => game.start());
+game.dom.autoBtn.addEventListener("click", () => game.toggleAuto());
+// 既定テイストを適用 (CSS変数・UI文言・セレクタ初期化)
+applyTheme("wafu");
+// タイトル画面でも背景と星を動かしておく
+game.loop();
+</script>
+</body>
+</html>
