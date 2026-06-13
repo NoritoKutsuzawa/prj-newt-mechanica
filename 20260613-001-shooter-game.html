@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>横スクロールシューティング</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', monospace; }
+  #wrapper { position: relative; }
+  canvas { display: block; border: 2px solid #333; }
+  #ui { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; padding: 8px 12px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .ui-left, .ui-right { display: flex; flex-direction: column; gap: 2px; }
+  .ui-label { font-size: 11px; letter-spacing: 1px; opacity: 0.7; }
+  .ui-value { font-size: 20px; font-weight: bold; }
+  #lives-display { font-size: 20px; }
+  #overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    gap: 16px; background: rgba(0,0,0,0.85);
+  }
+  #overlay h1 { font-size: 36px; letter-spacing: 4px; }
+  #overlay .sub { font-size: 13px; opacity: 0.6; }
+  .theme-select { display: flex; gap: 12px; }
+  .theme-btn {
+    padding: 10px 24px; font-size: 15px; cursor: pointer;
+    border: 2px solid; background: transparent; font-family: inherit;
+    letter-spacing: 2px; transition: all 0.2s;
+  }
+  .theme-btn:hover, .theme-btn.selected { color: #111; }
+  .difficulty-select { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .diff-btn {
+    padding: 8px 18px; font-size: 13px; cursor: pointer;
+    border: 2px solid #555; background: transparent; color: #aaa;
+    font-family: inherit; letter-spacing: 1px; transition: all 0.2s;
+  }
+  .diff-btn:hover { border-color: #aaa; color: #fff; }
+  .diff-btn.selected { border-color: #fff; color: #fff; background: rgba(255,255,255,0.1); }
+  .start-btn {
+    padding: 12px 48px; font-size: 18px; cursor: pointer;
+    background: transparent; font-family: inherit; letter-spacing: 3px;
+    transition: all 0.2s; margin-top: 8px;
+  }
+  .auto-toggle {
+    display: flex; align-items: center; gap: 10px; font-size: 13px; color: #aaa; cursor: pointer;
+  }
+  .toggle-box {
+    width: 40px; height: 20px; border: 2px solid #555; border-radius: 10px;
+    position: relative; transition: all 0.2s; cursor: pointer;
+  }
+  .toggle-box.on { border-color: #0f0; background: rgba(0,255,0,0.15); }
+  .toggle-box::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%; background: #555; transition: all 0.2s;
+  }
+  .toggle-box.on::after { left: 22px; background: #0f0; }
+  #gameover-msg { font-size: 13px; color: #888; }
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <canvas id="c" width="800" height="500"></canvas>
+  <div id="ui"></div>
+  <div id="overlay"></div>
+</div>
+
+<script>
+// =============================================
+// テーマ定義 (ここに追加すれば増やせる)
+// =============================================
+const THEMES = {
+  japan: {
+    id: 'japan',
+    name: '日本',
+    label: '🗾 日本',
+    titleColor: '#e8003a',
+    accentColor: '#e8003a',
+    btnBg: '#e8003a',
+    bgColors: ['#1a0010', '#2d0020', '#1a0010'],
+    groundColor: '#1a0a00',
+    cloudColor: 'rgba(255,200,180,0.15)',
+    playerColor: '#e8003a',
+    playerAccent: '#ffcc00',
+    bulletColor: '#ffcc00',
+    uiColor: '#e8003a',
+    scoreColor: '#ffcc00',
+    bgLabel: '大和',
+    enemyConfigs: [
+      { name: '雑兵',  color: '#6644aa', accentColor: '#aa66ff', hp: 1, score: 10,  speed: 2.5, size: 12, shootChance: 0.003 },
+      { name: '侍',    color: '#aa2200', accentColor: '#ff6644', hp: 3, score: 30,  speed: 1.8, size: 18, shootChance: 0.006 },
+      { name: '鬼',    color: '#cc0044', accentColor: '#ff4488', hp: 8, score: 100, speed: 1.2, size: 26, shootChance: 0.010 },
+      { name: '龍',    color: '#0044cc', accentColor: '#4488ff', hp: 20, score: 300, speed: 0.8, size: 36, shootChance: 0.015, boss: true },
+    ],
+    bgStars: false,
+    bgMountain: true,
+    drawPlayer: drawPlayerJapan,
+    drawEnemy: drawEnemyJapan,
+    drawBullet: drawBulletJapan,
+    drawBackground: drawBgJapan,
+  },
+  america: {
+    id: 'america',
+    name: 'アメリカ',
+    label: '🦅 America',
+    titleColor: '#3355ff',
+    accentColor: '#3355ff',
+    btnBg: '#3355ff',
+    bgColors: ['#000820', '#001040', '#000820'],
+    groundColor: '#001a00',
+    cloudColor: 'rgba(150,180,255,0.12)',
+    playerColor: '#4488ff',
+    playerAccent: '#ff4444',
+    bulletColor: '#88ffff',
+    uiColor: '#4488ff',
+    scoreColor: '#88ffff',
+    bgLabel: 'USA',
+    enemyConfigs: [
+      { name: 'Drone',   color: '#448844', accentColor: '#88ff88', hp: 1, score: 10,  speed: 2.5, size: 12, shootChance: 0.003 },
+      { name: 'Fighter', color: '#884400', accentColor: '#ffaa44', hp: 3, score: 30,  speed: 1.8, size: 18, shootChance: 0.006 },
+      { name: 'Cruiser', color: '#446688', accentColor: '#88aaff', hp: 8, score: 100, speed: 1.2, size: 26, shootChance: 0.010 },
+      { name: 'UFO',     color: '#8800cc', accentColor: '#dd44ff', hp: 20, score: 300, speed: 0.8, size: 36, shootChance: 0.015, boss: true },
+    ],
+    bgStars: true,
+    bgMountain: false,
+    drawPlayer: drawPlayerAmerica,
+    drawEnemy: drawEnemyAmerica,
+    drawBullet: drawBulletAmerica,
+    drawBackground: drawBgAmerica,
+  },
+};
+
+const DIFFICULTIES = [
+  { id: 'easy',    name: 'Easy',   spawnRate: 0.008, speedMult: 0.7,  bulletSpeedMult: 0.7,  danmaku: false },
+  { id: 'normal',  name: 'Normal', spawnRate: 0.015, speedMult: 1.0,  bulletSpeedMult: 1.0,  danmaku: false },
+  { id: 'hard',    name: 'Hard',   spawnRate: 0.025, speedMult: 1.4,  bulletSpeedMult: 1.3,  danmaku: false },
+  { id: 'danmaku', name: '弾幕',   spawnRate: 0.020, speedMult: 1.2,  bulletSpeedMult: 1.5,  danmaku: true  },
+];
+
+// =============================================
+// ゲーム状態
+// =============================================
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+let theme, difficulty;
+let autoMode = false;
+let state = 'menu'; // menu | playing | gameover
+let score = 0, distance = 0, lives = 3;
+let player, bullets, enemies, enemyBullets, particles, stars;
+let frame = 0;
+let bgOffset = 0;
+let danmakuTimer = 0;
+let keys = {};
+let autoTarget = { x: 200, y: H / 2 };
+let autoMoveTimer = 0;
+
+// =============================================
+// 描画ヘルパー
+// =============================================
+function drawPlayerJapan(ctx, x, y, t) {
+  // 零戦風
+  ctx.save();
+  ctx.translate(x, y);
+  // 機体
+  ctx.fillStyle = theme.playerColor;
+  ctx.beginPath();
+  ctx.moveTo(28, 0); ctx.lineTo(-18, -10); ctx.lineTo(-22, 0); ctx.lineTo(-18, 10); ctx.closePath();
+  ctx.fill();
+  // 主翼
+  ctx.fillStyle = theme.playerAccent;
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(-10, -26); ctx.lineTo(-18, -8); ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(-10, 26); ctx.lineTo(-18, 8); ctx.closePath();
+  ctx.fill();
+  // エンジン炎
+  const flicker = 0.7 + 0.3 * Math.sin(t * 0.3);
+  ctx.fillStyle = `rgba(255,${150 + Math.floor(100*flicker)},0,0.8)`;
+  ctx.beginPath();
+  ctx.moveTo(-22, 0); ctx.lineTo(-28 - flicker*8, -4); ctx.lineTo(-28 - flicker*8, 4); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPlayerAmerica(ctx, x, y, t) {
+  // F-16風
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = theme.playerColor;
+  ctx.beginPath();
+  ctx.moveTo(30, 0); ctx.lineTo(-10, -8); ctx.lineTo(-20, 0); ctx.lineTo(-10, 8); ctx.closePath();
+  ctx.fill();
+  // デルタ翼
+  ctx.fillStyle = theme.playerAccent;
+  ctx.beginPath();
+  ctx.moveTo(5, 0); ctx.lineTo(-18, -22); ctx.lineTo(-20, -6); ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(5, 0); ctx.lineTo(-18, 22); ctx.lineTo(-20, 6); ctx.closePath();
+  ctx.fill();
+  // コックピット
+  ctx.fillStyle = 'rgba(180,220,255,0.8)';
+  ctx.beginPath(); ctx.ellipse(12, 0, 8, 4, 0, 0, Math.PI*2); ctx.fill();
+  // エンジン
+  const flicker = 0.7 + 0.3 * Math.sin(t * 0.3);
+  ctx.fillStyle = `rgba(100,200,255,0.9)`;
+  ctx.beginPath();
+  ctx.moveTo(-20, 0); ctx.lineTo(-28 - flicker*6, -3); ctx.lineTo(-28 - flicker*6, 3); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawEnemyJapan(ctx, e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  if (e.cfg.boss) {
+    // 龍っぽいボス
+    ctx.strokeStyle = e.cfg.accentColor;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const a = (frame * 0.05 + i * Math.PI * 2 / 5);
+      ctx.fillStyle = e.cfg.color;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * 14, Math.sin(a) * 14, 8, 5, a, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2); ctx.fill();
+    // 角
+    ctx.strokeStyle = e.cfg.accentColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-6, -12); ctx.lineTo(-10, -22); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(6, -12); ctx.lineTo(10, -22); ctx.stroke();
+  } else if (e.cfg.size > 20) {
+    // 鬼
+    ctx.fillStyle = e.cfg.color;
+    ctx.beginPath(); ctx.arc(0, 0, e.cfg.size/2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.arc(-6, -4, 4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-8, 6); ctx.quadraticCurveTo(0, 12, 8, 6); ctx.stroke();
+  } else {
+    // 小・中型
+    ctx.fillStyle = e.cfg.color;
+    ctx.beginPath();
+    ctx.moveTo(-e.cfg.size, 0);
+    ctx.lineTo(0, -e.cfg.size/2);
+    ctx.lineTo(e.cfg.size/2, 0);
+    ctx.lineTo(0, e.cfg.size/2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.arc(0, 0, e.cfg.size/4, 0, Math.PI*2); ctx.fill();
+  }
+  // HPバー
+  if (e.cfg.hp > 1) {
+    const bw = e.cfg.size * 1.5;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-bw/2, -e.cfg.size/2-10, bw, 4);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(-bw/2, -e.cfg.size/2-10, bw * e.hp / e.cfg.hp, 4);
+  }
+  ctx.restore();
+}
+
+function drawEnemyAmerica(ctx, e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  if (e.cfg.boss) {
+    // UFO
+    ctx.fillStyle = e.cfg.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, 28, 12, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.ellipse(0, -8, 14, 10, 0, 0, Math.PI*2); ctx.fill();
+    for (let i = 0; i < 6; i++) {
+      const a = frame * 0.06 + i * Math.PI / 3;
+      ctx.fillStyle = `hsl(${(frame*3+i*60)%360},100%,70%)`;
+      ctx.beginPath(); ctx.arc(Math.cos(a)*20, Math.sin(a)*6, 4, 0, Math.PI*2); ctx.fill();
+    }
+  } else if (e.cfg.size > 20) {
+    // Cruiser
+    ctx.fillStyle = e.cfg.color;
+    ctx.beginPath();
+    ctx.moveTo(-e.cfg.size, 0);
+    ctx.lineTo(-e.cfg.size/2, -e.cfg.size/2);
+    ctx.lineTo(e.cfg.size/2, -e.cfg.size/3);
+    ctx.lineTo(e.cfg.size, 0);
+    ctx.lineTo(e.cfg.size/2, e.cfg.size/3);
+    ctx.lineTo(-e.cfg.size/2, e.cfg.size/2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
+  } else {
+    // Drone/Fighter
+    ctx.fillStyle = e.cfg.color;
+    ctx.beginPath();
+    ctx.moveTo(-e.cfg.size, 0);
+    ctx.lineTo(e.cfg.size/2, -e.cfg.size/2);
+    ctx.lineTo(e.cfg.size, 0);
+    ctx.lineTo(e.cfg.size/2, e.cfg.size/2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = e.cfg.accentColor;
+    ctx.beginPath(); ctx.arc(0, 0, e.cfg.size/4, 0, Math.PI*2); ctx.fill();
+  }
+  if (e.cfg.hp > 1) {
+    const bw = e.cfg.size * 1.5;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-bw/2, -e.cfg.size/2-10, bw, 4);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(-bw/2, -e.cfg.size/2-10, bw * e.hp / e.cfg.hp, 4);
+  }
+  ctx.restore();
+}
+
+function drawBulletJapan(ctx, b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.fillStyle = theme.bulletColor;
+  if (b.enemy) {
+    ctx.fillStyle = '#ff4488';
+    ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,100,150,0.4)';
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(12, 0); ctx.lineTo(-4, -3); ctx.lineTo(-4, 3); ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBulletAmerica(ctx, b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  if (b.enemy) {
+    ctx.fillStyle = '#ff8833';
+    ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,150,50,0.3)';
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.fillStyle = theme.bulletColor;
+    ctx.fillRect(-2, -2, 14, 4);
+    ctx.fillStyle = 'rgba(150,255,255,0.5)';
+    ctx.fillRect(8, -1, 4, 2);
+  }
+  ctx.restore();
+}
+
+let mountainCache = null;
+function drawBgJapan(ctx, offset) {
+  // グラデーション空
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0010');
+  grad.addColorStop(0.5, '#3d0020');
+  grad.addColorStop(1, '#1a0a00');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // 雲
+  ctx.fillStyle = theme.cloudColor;
+  for (let i = 0; i < 5; i++) {
+    const cx = ((i * 230 + offset * 0.3) % (W + 100)) - 50;
+    const cy = 60 + i * 30;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 60, 18, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+30, cy-8, 40, 14, 0, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 山（後景）
+  ctx.fillStyle = 'rgba(60,0,20,0.6)';
+  for (let i = 0; i < 4; i++) {
+    const mx = ((i * 250 + offset * 0.15) % (W + 200)) - 100;
+    ctx.beginPath();
+    ctx.moveTo(mx - 120, H * 0.85);
+    ctx.lineTo(mx, H * 0.4);
+    ctx.lineTo(mx + 120, H * 0.85);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // 地面
+  ctx.fillStyle = theme.groundColor;
+  ctx.fillRect(0, H * 0.88, W, H * 0.12);
+  // 地面の線
+  ctx.strokeStyle = 'rgba(255,100,0,0.3)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const lx = ((i * 140 + offset * 2) % (W + 140)) - 140;
+    ctx.beginPath(); ctx.moveTo(lx, H * 0.88); ctx.lineTo(lx + 60, H); ctx.stroke();
+  }
+}
+
+function drawBgAmerica(ctx, offset) {
+  // 宇宙
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#000820');
+  grad.addColorStop(1, '#001040');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // 星
+  if (!stars) {
+    stars = [];
+    for (let i = 0; i < 150; i++) {
+      stars.push({ x: Math.random() * W, y: Math.random() * H * 0.9, r: Math.random() * 1.5, speed: 0.3 + Math.random() * 0.7 });
+    }
+  }
+  for (const s of stars) {
+    s.x -= s.speed;
+    if (s.x < 0) s.x = W;
+    ctx.fillStyle = `rgba(255,255,255,${0.4 + s.r * 0.3})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 星雲
+  ctx.fillStyle = 'rgba(50,80,180,0.08)';
+  for (let i = 0; i < 3; i++) {
+    const nx = ((i * 300 + offset * 0.1) % (W + 200)) - 100;
+    ctx.beginPath(); ctx.ellipse(nx, H*0.3 + i*80, 120, 50, 0.3, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 地面（惑星表面）
+  ctx.fillStyle = '#001a00';
+  ctx.fillRect(0, H * 0.88, W, H * 0.12);
+  ctx.strokeStyle = 'rgba(0,255,100,0.2)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const lx = ((i * 160 + offset * 2.5) % (W + 160)) - 160;
+    ctx.beginPath(); ctx.moveTo(lx, H * 0.88); ctx.lineTo(lx + 80, H); ctx.stroke();
+  }
+}
+
+// =============================================
+// ゲームロジック
+// =============================================
+function initGame() {
+  player = {
+    x: 120, y: H / 2,
+    w: 40, h: 20,
+    speed: 4,
+    invincible: 0,
+    shootCooldown: 0,
+  };
+  bullets = [];
+  enemies = [];
+  enemyBullets = [];
+  particles = [];
+  stars = null;
+  score = 0;
+  distance = 0;
+  lives = 3;
+  frame = 0;
+  bgOffset = 0;
+  danmakuTimer = 0;
+}
+
+function spawnEnemy() {
+  const cfgs = theme.enemyConfigs;
+  // 重み付き選択 (ボスは稀に)
+  const weights = cfgs.map((c, i) => c.boss ? 1 : (cfgs.length - i) * 4);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  let idx = 0;
+  for (let i = 0; i < weights.length; i++) { r -= weights[i]; if (r <= 0) { idx = i; break; } }
+  const cfg = cfgs[idx];
+  const sm = difficulty.speedMult;
+  enemies.push({
+    x: W + cfg.size + 10,
+    y: cfg.size + Math.random() * (H * 0.88 - cfg.size * 2),
+    cfg,
+    hp: cfg.hp,
+    speed: cfg.speed * sm,
+    shootTimer: Math.random() * 100,
+    wavePhase: Math.random() * Math.PI * 2,
+  });
+}
+
+function fireDanmaku(cx, cy, pattern) {
+  const count = pattern === 'ring' ? 24 : pattern === 'spiral' ? 16 : 20;
+  const angleOffset = frame * 0.04;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + angleOffset;
+    const spd = 2.5 * difficulty.bulletSpeedMult;
+    enemyBullets.push({
+      x: cx, y: cy,
+      vx: Math.cos(a) * spd,
+      vy: Math.sin(a) * spd,
+      enemy: true,
+      danmaku: true,
+    });
+  }
+  // 副弾幕
+  if (pattern === 'spiral') {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + angleOffset + Math.PI / 8;
+      enemyBullets.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * 1.5 * difficulty.bulletSpeedMult,
+        vy: Math.sin(a) * 1.5 * difficulty.bulletSpeedMult,
+        enemy: true, danmaku: true,
+      });
+    }
+  }
+}
+
+function addParticle(x, y, color, count = 8) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 1 + Math.random() * 3;
+    particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 30 + Math.random()*20, color });
+  }
+}
+
+function updateAuto() {
+  autoMoveTimer--;
+  if (autoMoveTimer <= 0) {
+    autoMoveTimer = 30 + Math.random() * 60;
+    if (difficulty.danmaku) {
+      // 弾幕モード: 危険回避 (最も近い弾から逃げる)
+      let nearestDist = Infinity, nearestBullet = null;
+      for (const b of enemyBullets) {
+        const d = Math.hypot(b.x - player.x, b.y - player.y);
+        if (d < nearestDist) { nearestDist = d; nearestBullet = b; }
+      }
+      if (nearestBullet && nearestDist < 150) {
+        autoTarget.x = player.x + (player.x - nearestBullet.x) * 0.5;
+        autoTarget.y = player.y + (player.y - nearestBullet.y) * 0.5;
+      } else {
+        autoTarget.x = 80 + Math.random() * (W * 0.4);
+        autoTarget.y = 60 + Math.random() * (H * 0.8 - 60);
+      }
+    } else {
+      const nearEnemy = enemies.reduce((a, e) => (!a || e.x < a.x) ? e : a, null);
+      if (nearEnemy) {
+        autoTarget.y = nearEnemy.y + (Math.random()-0.5)*40;
+        autoTarget.x = player.x;
+      } else {
+        autoTarget.x = 80 + Math.random() * 140;
+        autoTarget.y = 60 + Math.random() * (H * 0.8 - 60);
+      }
+    }
+    autoTarget.x = Math.max(30, Math.min(W * 0.55, autoTarget.x));
+    autoTarget.y = Math.max(30, Math.min(H * 0.85, autoTarget.y));
+  }
+  const dx = autoTarget.x - player.x, dy = autoTarget.y - player.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist > 4) {
+    player.x += (dx / dist) * player.speed;
+    player.y += (dy / dist) * player.speed;
+  }
+  // 自動射撃
+  if (player.shootCooldown <= 0) {
+    shoot();
+    player.shootCooldown = 12;
+  }
+}
+
+function shoot() {
+  bullets.push({ x: player.x + 28, y: player.y, vx: 10, vy: 0, enemy: false });
+}
+
+function update() {
+  frame++;
+  bgOffset += 2;
+  distance += 0.05;
+
+  // 自機操作
+  if (autoMode) {
+    updateAuto();
+  } else {
+    if (keys['ArrowUp'] || keys['w'])    player.y -= player.speed;
+    if (keys['ArrowDown'] || keys['s'])  player.y += player.speed;
+    if (keys['ArrowLeft'] || keys['a'])  player.x -= player.speed;
+    if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
+    if (keys[' '] && player.shootCooldown <= 0) { shoot(); player.shootCooldown = 12; }
+  }
+  player.x = Math.max(20, Math.min(W * 0.6, player.x));
+  player.y = Math.max(20, Math.min(H * 0.87, player.y));
+  if (player.shootCooldown > 0) player.shootCooldown--;
+  if (player.invincible > 0) player.invincible--;
+
+  // 弾幕タイマー
+  if (difficulty.danmaku) {
+    danmakuTimer++;
+    const interval = 60;
+    if (danmakuTimer % interval === 0) {
+      const patterns = ['ring', 'spiral', 'dense'];
+      const pat = patterns[Math.floor(danmakuTimer / interval) % patterns.length];
+      // 画面各所から発生
+      const sources = [
+        { x: W * 0.7, y: H * 0.25 },
+        { x: W * 0.85, y: H * 0.5 },
+        { x: W * 0.7, y: H * 0.75 },
+        { x: W * 0.6, y: H * 0.5 },
+      ];
+      for (const s of sources) fireDanmaku(s.x, s.y, pat);
+    }
+  }
+
+  // 敵スポーン
+  if (Math.random() < difficulty.spawnRate) spawnEnemy();
+
+  // 自機弾更新
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx;
+    if (b.x > W + 20) { bullets.splice(i, 1); continue; }
+    // 敵に当たる
+    let hit = false;
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      const e = enemies[j];
+      if (Math.hypot(b.x - e.x, b.y - e.y) < e.cfg.size) {
+        e.hp--;
+        addParticle(b.x, b.y, e.cfg.accentColor, 4);
+        bullets.splice(i, 1);
+        hit = true;
+        if (e.hp <= 0) {
+          score += e.cfg.score;
+          addParticle(e.x, e.y, e.cfg.accentColor, 16);
+          enemies.splice(j, 1);
+        }
+        break;
+      }
+    }
+  }
+
+  // 敵更新
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    e.x -= e.speed;
+    e.y += Math.sin(frame * 0.04 + e.wavePhase) * 0.8;
+    e.shootTimer--;
+    if (e.shootTimer <= 0) {
+      e.shootTimer = 60 + Math.random() * 80;
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      const spd = 3.5 * difficulty.bulletSpeedMult;
+      if (difficulty.danmaku && e.cfg.boss) {
+        fireDanmaku(e.x, e.y, 'spiral');
+      } else {
+        enemyBullets.push({ x: e.x, y: e.y, vx: Math.cos(angle)*spd, vy: Math.sin(angle)*spd, enemy: true });
+      }
+    }
+    if (e.x < -e.cfg.size - 10) { enemies.splice(i, 1); }
+  }
+
+  // 敵弾更新
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const b = enemyBullets[i];
+    b.x += b.vx; b.y += b.vy;
+    if (b.x < -10 || b.x > W+10 || b.y < -10 || b.y > H+10) { enemyBullets.splice(i, 1); continue; }
+    if (player.invincible <= 0 && Math.hypot(b.x - player.x, b.y - player.y) < 14) {
+      lives--;
+      player.invincible = 120;
+      addParticle(player.x, player.y, theme.playerColor, 20);
+      enemyBullets.splice(i, 1);
+      if (lives <= 0) { state = 'gameover'; showOverlay(); return; }
+    }
+  }
+
+  // パーティクル
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vx *= 0.95; p.vy *= 0.95; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  theme.drawBackground(ctx, bgOffset);
+
+  // 敵
+  for (const e of enemies) theme.drawEnemy(ctx, e);
+
+  // 敵弾
+  for (const b of enemyBullets) theme.drawBullet(ctx, b);
+
+  // 自機弾
+  for (const b of bullets) theme.drawBullet(ctx, b);
+
+  // 自機
+  if (player.invincible <= 0 || Math.floor(player.invincible / 6) % 2 === 0) {
+    theme.drawPlayer(ctx, player.x, player.y, frame);
+  }
+
+  // パーティクル
+  for (const p of particles) {
+    ctx.globalAlpha = p.life / 50;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // UI
+  updateHUD();
+}
+
+function updateHUD() {
+  const ui = document.getElementById('ui');
+  const t = theme;
+  ui.style.color = t.uiColor;
+  ui.innerHTML = `
+    <div class="ui-left">
+      <div class="ui-label">SCORE</div>
+      <div class="ui-value" style="color:${t.scoreColor}">${String(score).padStart(6,'0')}</div>
+      <div class="ui-label" style="margin-top:4px">DISTANCE</div>
+      <div class="ui-value" style="color:${t.scoreColor};font-size:16px">${distance.toFixed(1)} km</div>
+    </div>
+    <div class="ui-right" style="text-align:right">
+      <div class="ui-label">LIVES</div>
+      <div id="lives-display">${'♥'.repeat(lives)}<span style="opacity:0.3">${'♥'.repeat(Math.max(0,3-lives))}</span></div>
+      <div class="ui-label" style="margin-top:4px">${autoMode ? '⚡ AUTO' : difficulty.name.toUpperCase()}</div>
+    </div>
+  `;
+}
+
+// =============================================
+// メニュー / オーバーレイ
+// =============================================
+let selectedThemeId = 'japan';
+let selectedDiffId = 'normal';
+let selectedAuto = false;
+
+function showMenu(gameoverData) {
+  state = 'menu';
+  const overlay = document.getElementById('overlay');
+  const t = THEMES[selectedThemeId];
+
+  const themeButtons = Object.values(THEMES).map(th =>
+    `<button class="theme-btn ${th.id === selectedThemeId ? 'selected' : ''}"
+      style="border-color:${th.accentColor}; ${th.id === selectedThemeId ? `background:${th.btnBg};color:#fff` : `color:${th.accentColor}`}"
+      onclick="selectTheme('${th.id}')">${th.label}</button>`
+  ).join('');
+
+  const diffButtons = DIFFICULTIES.map(d =>
+    `<button class="diff-btn ${d.id === selectedDiffId ? 'selected' : ''}"
+      onclick="selectDiff('${d.id}')">${d.name}</button>`
+  ).join('');
+
+  let gameoverHtml = '';
+  if (gameoverData) {
+    gameoverHtml = `<div id="gameover-msg">SCORE: ${gameoverData.score}　到達距離: ${gameoverData.distance.toFixed(1)} km</div>`;
+  }
+
+  overlay.innerHTML = `
+    <h1 style="color:${t.titleColor}">SHOOT!</h1>
+    <div class="sub">${t.bgLabel} STYLE</div>
+    ${gameoverHtml}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <div class="ui-label" style="color:#888">テーマ</div>
+      <div class="theme-select">${themeButtons}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <div class="ui-label" style="color:#888">難易度</div>
+      <div class="difficulty-select">${diffButtons}</div>
+    </div>
+    <div class="auto-toggle" onclick="toggleAuto()">
+      <div class="toggle-box ${selectedAuto ? 'on' : ''}"></div>
+      <span>自動操縦モード</span>
+    </div>
+    <button class="start-btn"
+      style="border:2px solid ${t.accentColor};color:${t.accentColor}"
+      onmouseover="this.style.background='${t.btnBg}';this.style.color='#fff'"
+      onmouseout="this.style.background='transparent';this.style.color='${t.accentColor}'"
+      onclick="startGame()">START GAME</button>
+    <div class="sub">Arrow Keys: 移動　Space: 射撃</div>
+  `;
+  overlay.style.display = 'flex';
+}
+
+function showOverlay() {
+  showMenu({ score, distance });
+}
+
+window.selectTheme = (id) => {
+  selectedThemeId = id;
+  showMenu(state === 'gameover' ? { score, distance } : null);
+};
+window.selectDiff = (id) => {
+  selectedDiffId = id;
+  showMenu(state === 'gameover' ? { score, distance } : null);
+};
+window.toggleAuto = () => {
+  selectedAuto = !selectedAuto;
+  showMenu(state === 'gameover' ? { score, distance } : null);
+};
+window.startGame = () => {
+  theme = THEMES[selectedThemeId];
+  difficulty = DIFFICULTIES.find(d => d.id === selectedDiffId);
+  autoMode = selectedAuto;
+  document.getElementById('overlay').style.display = 'none';
+  initGame();
+  state = 'playing';
+};
+
+// =============================================
+// メインループ
+// =============================================
+function loop() {
+  if (state === 'playing') {
+    update();
+    render();
+  }
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ') e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+showMenu(null);
+loop();
+</script>
+</body>
+</html>
