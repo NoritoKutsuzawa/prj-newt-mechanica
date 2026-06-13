@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shooting Game</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: #030712;
+      color: #f9fafb;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      gap: 10px;
+    }
+    #game {
+      border: 1px solid #374151;
+      background: #111827;
+      width: min(92vw, 520px);
+      aspect-ratio: 4 / 3;
+      display: block;
+    }
+    .hud { width: min(92vw, 520px); display: flex; justify-content: space-between; }
+    a { color: #93c5fd; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <strong id="score">Score: 0</strong>
+    <a href="../../index.html">← Top</a>
+  </div>
+  <canvas id="game" width="520" height="390" aria-label="shooting game"></canvas>
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const keys = new Set();
+
+    const player = { x: canvas.width / 2 - 14, y: canvas.height - 46, w: 28, h: 28, speed: 4 };
+    const bullets = [];
+    const enemies = [];
+    let score = 0;
+    let tick = 0;
+
+    addEventListener("keydown", (e) => keys.add(e.code));
+    addEventListener("keyup", (e) => keys.delete(e.code));
+
+    function spawnEnemy() {
+      enemies.push({
+        x: Math.random() * (canvas.width - 22),
+        y: -20,
+        w: 22,
+        h: 22,
+        speed: 1 + Math.random() * 1.8
+      });
+    }
+
+    function rectHit(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function loop() {
+      tick++;
+      if (tick % 48 === 0) spawnEnemy();
+      if (keys.has("ArrowLeft")) player.x -= player.speed;
+      if (keys.has("ArrowRight")) player.x += player.speed;
+      if (keys.has("ArrowUp")) player.y -= player.speed;
+      if (keys.has("ArrowDown")) player.y += player.speed;
+      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+      player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
+
+      if (keys.has("Space") && tick % 8 === 0) {
+        bullets.push({ x: player.x + player.w / 2 - 2, y: player.y - 10, w: 4, h: 10, speed: 7 });
+      }
+
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        bullets[i].y -= bullets[i].speed;
+        if (bullets[i].y + bullets[i].h < 0) bullets.splice(i, 1);
+      }
+
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        enemies[i].y += enemies[i].speed;
+        if (enemies[i].y > canvas.height) enemies.splice(i, 1);
+      }
+
+      for (let ei = enemies.length - 1; ei >= 0; ei--) {
+        const enemy = enemies[ei];
+        let destroyed = false;
+        for (let bi = bullets.length - 1; bi >= 0; bi--) {
+          if (rectHit(enemy, bullets[bi])) {
+            enemies.splice(ei, 1);
+            bullets.splice(bi, 1);
+            score++;
+            scoreEl.textContent = `Score: ${score}`;
+            destroyed = true;
+            break;
+          }
+        }
+        if (!destroyed && rectHit(enemy, player)) {
+          score = 0;
+          bullets.length = 0;
+          enemies.length = 0;
+          player.x = canvas.width / 2 - 14;
+          player.y = canvas.height - 46;
+          scoreEl.textContent = "Score: 0 (Game Over)";
+          break;
+        }
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillStyle = "#60a5fa";
+      bullets.forEach((b) => ctx.fillRect(b.x, b.y, b.w, b.h));
+      ctx.fillStyle = "#ef4444";
+      enemies.forEach((e) => ctx.fillRect(e.x, e.y, e.w, e.h));
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reflex Click Game</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      min-height: 100vh;
+      background: #020617;
+      color: #e2e8f0;
+      display: grid;
+      place-items: center;
+    }
+    .wrap { width: min(92vw, 540px); }
+    .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    a { color: #93c5fd; text-decoration: none; }
+    .field {
+      position: relative;
+      height: 360px;
+      border: 1px solid #334155;
+      background: #111827;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #target {
+      position: absolute;
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: #22d3ee;
+      cursor: pointer;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <strong id="score">Score: 0</strong>
+      <a href="../../index.html">← Top</a>
+    </div>
+    <div class="field" id="field">
+      <button id="target" type="button" aria-label="target"></button>
+    </div>
+  </div>
+  <script>
+    const field = document.getElementById("field");
+    const target = document.getElementById("target");
+    const scoreEl = document.getElementById("score");
+    let score = 0;
+
+    function placeTarget() {
+      const maxX = field.clientWidth - target.offsetWidth;
+      const maxY = field.clientHeight - target.offsetHeight;
+      target.style.left = Math.round(Math.random() * maxX) + "px";
+      target.style.top = Math.round(Math.random() * maxY) + "px";
+    }
+
+    target.addEventListener("click", () => {
+      score++;
+      scoreEl.textContent = `Score: ${score}`;
+      placeTarget();
+    });
+
+    addEventListener("resize", placeTarget);
+    placeTarget();
+  </script>
+</body>
+</html>
