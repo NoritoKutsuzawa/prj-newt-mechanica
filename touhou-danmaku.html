@@ -72,8 +72,8 @@
   /* オーバーレイ */
   #overlay {
     position: absolute; inset: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 12px; text-align: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: safe center;
+    gap: 9px; text-align: center; padding: 14px 10px; overflow-y: auto;
     background: radial-gradient(circle at 50% 40%, rgba(18,24,58,.45), rgba(2,3,10,.78));
     border-radius: 6px;
   }
@@ -82,6 +82,28 @@
     text-shadow: 0 0 18px var(--accent2), 0 0 40px var(--accent);
   }
   #overlay .sub { font-size: 13px; color: var(--accent); letter-spacing: 3px; margin-top: -6px; text-shadow: 0 1px 6px #000, 0 0 10px #000; }
+  #overlay .diff {
+    font-size: 15px; letter-spacing: 5px; font-weight: 700; margin-top: 2px;
+    color: var(--accent); text-shadow: 0 1px 4px #000, 0 0 10px #000;
+  }
+  #overlay .diff.hell {
+    color: #ff4d5e; text-shadow: 0 0 14px #ff2740, 0 1px 4px #000;
+    animation: hellpulse 1.4s ease-in-out infinite;
+  }
+  @keyframes hellpulse { 0%,100%{ text-shadow: 0 0 10px #ff2740, 0 1px 4px #000; } 50%{ text-shadow: 0 0 24px #ff4d5e, 0 0 8px #ff8090, 0 1px 4px #000; } }
+  #hellBadge {
+    position: absolute; bottom: 8px; right: 10px;
+    font-size: 11px; letter-spacing: 2px; font-weight: 700; color: var(--text);
+    background: rgba(20,28,54,.78); border: 1px solid var(--line);
+    padding: 3px 10px; border-radius: 10px; pointer-events: none;
+  }
+  #hellBadge.hell {
+    color: #ffd7dd; border-color: transparent;
+    background: linear-gradient(90deg, #7a0010, #c01028);
+    box-shadow: 0 0 14px rgba(200,20,40,.7);
+  }
+  /* セレクタの見出し */
+  .selLabel { font-size: 10px; letter-spacing: 3px; color: var(--dim); margin-top: 6px; }
   #overlay p { margin: 0; font-size: 13px; line-height: 1.9; color: var(--text); text-shadow: 0 1px 6px #000, 0 0 10px #000; }
   #overlay .key { color: var(--gold); font-weight: 700; }
   #overlay .stat { color: var(--accent); font-weight: 700; font-size: 18px; }
@@ -98,7 +120,7 @@
   }
   .autobtn.on { background: var(--accent); color: #051018; border-color: var(--accent); box-shadow: 0 0 16px var(--accent); font-weight: 700; }
   /* テイスト選択 */
-  #selector { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 2px; }
+  #selector, #diffSelector { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 2px; }
   .themeBtn {
     padding: 7px 16px; font-size: 13px; letter-spacing: 1px; cursor: pointer; font-family: inherit;
     background: transparent; color: var(--text); border: 2px solid var(--line); border-radius: 6px;
@@ -134,6 +156,7 @@
       </div>
     </div>
     <div id="autoBadge" class="hidden">◆ AUTO PILOT ◆</div>
+    <div id="hellBadge"></div>
     <div id="bossbar" class="hidden">
       <div class="name" id="bossName"></div>
       <div class="track"><div class="fill" id="bossFill"></div></div>
@@ -142,7 +165,11 @@
     <div id="overlay">
       <h1 id="ovTitle">幻 想 弾 幕</h1>
       <div class="sub" id="ovSub">TOUHOU-STYLE DANMAKU</div>
+      <div class="diff" id="ovDiff"></div>
       <p id="ovText"></p>
+      <div class="selLabel">難易度 / DIFFICULTY</div>
+      <div id="diffSelector"></div>
+      <div class="selLabel">テイスト / STYLE</div>
       <div id="selector"></div>
       <button id="autoBtn" class="autobtn on">オートプレイ: ON　[ A ]</button>
       <button id="startBtn">は じ め る</button>
@@ -707,6 +734,36 @@ function refreshOverlay() {
   document.getElementById("startBtn").textContent = over ? u.retry : u.start;
 }
 
+// 難易度ラベル(タイトルの赤字とプレイ中バッジ)を現在の難易度に合わせて更新
+function updateDiffStyle() {
+  const ovDiff = document.getElementById("ovDiff");
+  const badge = document.getElementById("hellBadge");
+  ovDiff.textContent = DIFF.label;
+  badge.textContent = DIFF.label;
+  ovDiff.classList.toggle("hell", DIFF.hell);
+  badge.classList.toggle("hell", DIFF.hell);
+}
+
+// 難易度を切り替える。ボス耐久は次戦の生成時に反映される
+function applyDifficulty(key) {
+  diffKey = key; DIFF = DIFFICULTIES[key];
+  [...document.getElementById("diffSelector").children].forEach(b => b.classList.toggle("active", b.dataset.key === key));
+  updateDiffStyle();
+}
+
+// 難易度選択ボタンを生成 (テイストと同様にタイトルのオーバーレイへ)
+(function buildDiffSelector() {
+  const sel = document.getElementById("diffSelector");
+  for (const key of Object.keys(DIFFICULTIES)) {
+    const btn = document.createElement("button");
+    btn.className = "themeBtn";
+    btn.dataset.key = key;
+    btn.textContent = DIFFICULTIES[key].name;
+    btn.addEventListener("click", () => applyDifficulty(key));
+    sel.appendChild(btn);
+  }
+})();
+
 function applyTheme(key) {
   themeKey = key; theme = THEMES[key];
   const c = theme.css, r = document.documentElement.style;
@@ -938,6 +995,29 @@ class Player {
 // ============================================================
 //  Boss — 画面上部の大型敵。スペルカードを循環して4種の弾幕を放つ。
 // ============================================================
+// ============================================================
+//  難易度 — 弾速・密度・発射間隔・安全幅をまとめて制御する。
+//  弾幕パターン本体は共通。ここの係数だけで難度が決まる。
+//  新しい段階はこのテーブルに1項目足し、buildDiffSelector が拾う。
+//  各項目: speed=弾速倍率 / extra=追加弾数係数 / fireRate=発射間隔倍率(小さいほど速い)
+//          gapHalf=隙間弾幕の安全回廊の半幅 / rainSafe=降下弾幕の安全幅 / hpScale=ボス耐久倍率
+//          rings=回転円形の重ね枚数 / gapAimPeriod=隙間弾幕の自機狙い周期(小さいほど頻繁)
+//          gapAimK=自機狙いの片側本数 / rainSidePeriod=降下弾幕の横弾周期 / hell=赤演出フラグ
+// ============================================================
+const DIFFICULTIES = {
+  normal: { name:"Normal", label:"NORMAL", hell:false,
+            speed:1.0,  extra:0.0, fireRate:1.0,  gapHalf:0.55, rainSafe:46, hpScale:1.0,
+            rings:2, gapAimPeriod:110, gapAimK:1, rainSidePeriod:40 },
+  hard:   { name:"Hard", label:"HARD", hell:false,
+            speed:1.15, extra:0.5, fireRate:0.85, gapHalf:0.48, rainSafe:40, hpScale:1.1,
+            rings:2, gapAimPeriod:90,  gapAimK:1, rainSidePeriod:34 },
+  muken:  { name:"無間", label:"無間 ・ INFERNO", hell:true,
+            speed:1.35, extra:1.0, fireRate:0.7,  gapHalf:0.40, rainSafe:30, hpScale:1.25,
+            rings:3, gapAimPeriod:70,  gapAimK:2, rainSidePeriod:28 },
+};
+let diffKey = "muken";          // 既定は無間(地獄モード)
+let DIFF = DIFFICULTIES[diffKey];
+
 // スペル名はテイストごとに theme.spells から引く。ここでは体力とパターンのみ共通定義
 const SPELLS = [
   { hp: 2600, pattern: "ring" },
@@ -953,8 +1033,7 @@ class Boss {
     this.r = 34;
     this.t = 0;
     this.spellIdx = 0;
-    this.hp = SPELLS[0].hp;
-    this.maxHp = SPELLS[0].hp;
+    this.hp = this.maxHp = Math.floor(SPELLS[0].hp * DIFF.hpScale);
     this.emitTimer = 0;
     this.spiralAng = 0;
     this.gapAng = 0;
@@ -980,7 +1059,7 @@ class Boss {
     const s = SPELLS[this.spellIdx % SPELLS.length];
     // 一周ごとに体力を増やして長く楽しめるようにする
     const scale = 1 + Math.floor(this.spellIdx / SPELLS.length) * 0.35;
-    this.hp = this.maxHp = Math.floor(s.hp * scale);
+    this.hp = this.maxHp = Math.floor(s.hp * scale * DIFF.hpScale);
     this.invuln = 100;
     this.emitTimer = 0;
     Sound.spell();
@@ -1002,11 +1081,12 @@ class Boss {
     const p = this.pattern;
     if (p === "ring") {
       // 回転円形弾幕: 多重リングを回転させながら放射
-      const n = 22 + lv * 2;
+      const n = 22 + lv * 2 + Math.round(8 * DIFF.extra);
       const base = this.t * 0.04;
       const cols = [PAL.red, PAL.gold, PAL.purple];
-      for (let ring = 0; ring < 2; ring++) {
-        const spd = 1.8 + ring * 0.7 + lv * 0.15;
+      const rings = DIFF.rings; // 難易度でリングの重ね枚数を変える
+      for (let ring = 0; ring < rings; ring++) {
+        const spd = (1.8 + ring * 0.7 + lv * 0.15) * DIFF.speed;
         const off = ring * (Math.PI / n);
         const col = cols[(ring + (this.t >> 5)) % cols.length];
         for (let i = 0; i < n; i++) {
@@ -1014,27 +1094,27 @@ class Boss {
           g.spawn(this.x, this.y, Math.cos(a) * spd, Math.sin(a) * spd, 6, col);
         }
       }
-      this.emitTimer = 26;
+      this.emitTimer = Math.max(8, Math.round(26 * DIFF.fireRate));
     } else if (p === "spiral") {
       // 螺旋弾幕: 時計回りと反時計回りの腕を同時に伸ばす
       this.spiralAng += 0.30;
-      const arms = 3 + Math.floor(lv / 2);
-      const spd = 2.3 + lv * 0.12;
+      const arms = 3 + Math.floor(lv / 2) + Math.round(2 * DIFF.extra);
+      const spd = (2.3 + lv * 0.12) * DIFF.speed;
       for (let i = 0; i < arms; i++) {
         const a1 = this.spiralAng + TAU / arms * i;
         const a2 = -this.spiralAng + TAU / arms * i + 0.4;
         g.spawn(this.x, this.y, Math.cos(a1) * spd, Math.sin(a1) * spd, 5, PAL.cyan);
         g.spawn(this.x, this.y, Math.cos(a2) * spd, Math.sin(a2) * spd, 5, PAL.green);
       }
-      this.emitTimer = 6;
+      this.emitTimer = Math.max(3, Math.round(6 * DIFF.fireRate));
     } else if (p === "gap") {
       // 隙間弾幕: 大量の全方位弾に一定角度の空白を作り続ける
       // 回転を遅くすると安全回廊が安定し、抜ける様子を眺めやすい
       this.gapAng += 0.02;
-      const n = 36 + lv * 4;
+      const n = 36 + lv * 4 + Math.round(10 * DIFF.extra);
       const gapCenter = this.gapAng % TAU;
-      const gapHalf = 0.55;            // 空白の半幅
-      const spd = 2.2 + lv * 0.12;
+      const gapHalf = DIFF.gapHalf;    // 空白の半幅。地獄モードで狭める
+      const spd = (2.2 + lv * 0.12) * DIFF.speed;
       for (let i = 0; i < n; i++) {
         const a = TAU / n * i;
         let d = Math.abs(((a - gapCenter + Math.PI) % TAU) - Math.PI);
@@ -1042,36 +1122,38 @@ class Boss {
         g.spawn(this.x, this.y, Math.cos(a) * spd, Math.sin(a) * spd, 5.5, PAL.purple);
       }
       // 自機狙いの一矢で隙間へ誘導する緊張感を出す
-      if (this.t % 110 === 0) {
+      if (this.t % DIFF.gapAimPeriod === 0) {
         const aim = Math.atan2(g.player.y - this.y, g.player.x - this.x);
-        for (let k = -1; k <= 1; k++)
-          g.spawn(this.x, this.y, Math.cos(aim + k * 0.12) * 4.0, Math.sin(aim + k * 0.12) * 4.0, 6, PAL.gold);
+        const aimSpd = 4.0 * DIFF.speed;
+        for (let k = -DIFF.gapAimK; k <= DIFF.gapAimK; k++)
+          g.spawn(this.x, this.y, Math.cos(aim + k * 0.12) * aimSpd, Math.sin(aim + k * 0.12) * aimSpd, 6, PAL.gold);
       }
-      this.emitTimer = 22;
+      this.emitTimer = Math.max(8, Math.round(22 * DIFF.fireRate));
     } else {
       // 降下型弾幕: 上端から下へ流す。波・加速・減速・曲がる弾と一時的な安全地帯
       const cols = [PAL.blue, PAL.cyan, PAL.green];
-      const cnt = 5 + lv;
-      // 安全地帯を作るため、ある一区画は撃たない
+      const cnt = 5 + lv + Math.round(4 * DIFF.extra);
+      const sp = DIFF.speed;
+      // 安全地帯を作るため、ある一区画は撃たない。地獄モードは安全幅を狭める
       const safeX = W * 0.5 + Math.sin(this.t * 0.03) * W * 0.32;
       for (let i = 0; i < cnt; i++) {
         const x = rand(20, W - 20);
-        if (Math.abs(x - safeX) < 46) continue;
+        if (Math.abs(x - safeX) < DIFF.rainSafe) continue;
         const kind = Math.floor(rand(0, 4));
         const col = cols[i % cols.length];
-        if (kind === 0)      g.spawn(x, -10, 0, rand(2.2, 3.0), 6, col, { accel: 0.05, maxSpd: 6 });   // 加速
-        else if (kind === 1) g.spawn(x, -10, 0, rand(3.8, 4.6), 6, col, { accel: -0.04, minSpd: 1.2 }); // 減速
-        else if (kind === 2) g.spawn(x, -10, rand(-0.6, 0.6), 2.6, 5.5, col, { wave: 1.4, waveFreq: 0.12 }); // 波
-        else                 g.spawn(x, -10, rand(-1.2, 1.2), 2.8, 5.5, col, { curve: rand(-0.02, 0.02) }); // 曲がる
+        if (kind === 0)      g.spawn(x, -10, 0, rand(2.2, 3.0) * sp, 6, col, { accel: 0.05, maxSpd: 6 * sp });   // 加速
+        else if (kind === 1) g.spawn(x, -10, 0, rand(3.8, 4.6) * sp, 6, col, { accel: -0.04, minSpd: 1.2 }); // 減速
+        else if (kind === 2) g.spawn(x, -10, rand(-0.6, 0.6), 2.6 * sp, 5.5, col, { wave: 1.4, waveFreq: 0.12 }); // 波
+        else                 g.spawn(x, -10, rand(-1.2, 1.2), 2.8 * sp, 5.5, col, { curve: rand(-0.02, 0.02) }); // 曲がる
       }
       // ときどき左右から差し込む横弾で立体感を出す
-      if (this.t % 40 === 0) {
+      if (this.t % DIFF.rainSidePeriod === 0) {
         const fromLeft = Math.random() < 0.5;
         const sx = fromLeft ? -10 : W + 10;
-        const vx = fromLeft ? rand(2.2, 3.0) : -rand(2.2, 3.0);
+        const vx = fromLeft ? rand(2.2, 3.0) * sp : -rand(2.2, 3.0) * sp;
         g.spawn(sx, rand(60, H * 0.5), vx, rand(0.6, 1.4), 6, PAL.red, { curve: rand(-0.01, 0.01) });
       }
-      this.emitTimer = 14;
+      this.emitTimer = Math.max(6, Math.round(14 * DIFF.fireRate));
     }
   }
   draw(g) { theme.drawBoss(g, this); }
@@ -1535,6 +1617,8 @@ class Game {
 const game = new Game();
 game.dom.startBtn.addEventListener("click", () => game.start());
 game.dom.autoBtn.addEventListener("click", () => game.toggleAuto());
+// 既定難易度(無間)を適用 (ボタンのハイライト・ラベル・バッジ初期化)
+applyDifficulty(diffKey);
 // 既定テイストを適用 (CSS変数・UI文言・セレクタ初期化)
 applyTheme("wafu");
 // タイトル画面でも背景と星を動かしておく
